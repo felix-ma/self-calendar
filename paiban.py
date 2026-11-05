@@ -264,6 +264,49 @@ def load_places() -> dict:
     return {}
 
 
+COMMUTE_FILE = ROOT / "commute.json"
+_COMMUTE = None
+
+
+def load_commute() -> dict:
+    global _COMMUTE
+    if _COMMUTE is None:
+        try:
+            _COMMUTE = json.loads(COMMUTE_FILE.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            _COMMUTE = {}
+    return _COMMUTE
+
+
+def parse_alarm(v):
+    """auto / off / 分钟数；auto 按通勤时间动态算。"""
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in ("", "auto"):
+        return None
+    if s in ("off", "0", "none", "no"):
+        return 0
+    try:
+        return max(0, int(s))
+    except ValueError:
+        return None
+
+
+def alarm_info(e: dict, fixed=None):
+    if fixed is not None:
+        return fixed, None
+    c = load_commute()
+    info = (c.get("stores") or {}).get(e["store"]) or {}
+    if not info:
+        return 0, None
+    travel = float(info.get("drive_min") or 0)
+    base = travel * float(c.get("traffic_factor", 1.8)) + float(c.get("buffer_min", 10))
+    minutes = int(round(base / 5.0)) * 5
+    minutes = max(int(c.get("min_alarm", 15)), min(int(c.get("max_alarm", 180)), minutes))
+    return minutes, travel
+
+
 def amap_search_url(keyword: str) -> str:
     return ("https://uri.amap.com/search?keyword="
             + urllib.parse.quote(keyword, safe="") + "&city=440300")
@@ -333,7 +376,7 @@ def _calendar_header() -> list:
     ]
 
 
-def _event_lines(e: dict, stamp: str, alarm: int = 0) -> list:
+def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
     cfg, day, shift = e["cfg"], e["day"], e["shift"]
     store, full, addr = e["store"], e["full"], e["addr"]
     summary = shift + (f"·{store}" if store else "")
@@ -358,9 +401,15 @@ def _event_lines(e: dict, stamp: str, alarm: int = 0) -> list:
         if addr:
             lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
     lines += [f"DESCRIPTION:{_esc(desc)}", "STATUS:CONFIRMED", "TRANSP:OPAQUE"]
-    if alarm:
-        lines += ["BEGIN:VALARM", "TRIGGER:-PT%dM" % int(alarm), "ACTION:DISPLAY",
-                  f"DESCRIPTION:{_esc(summary)}", "END:VALARM"]
+    minutes, travel = alarm_info(e, fixed_alarm)
+    if minutes:
+        label = "该出发了"
+        if e["store"]:
+            label += f" · 到{e['store']}"
+            if travel:
+                label += f" 车程约 {int(round(travel))} 分钟"
+        lines += ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes)}M", "ACTION:DISPLAY",
+                  f"DESCRIPTION:{_esc(label)}", "END:VALARM"]
     lines.append("END:VEVENT")
     return lines
 
@@ -369,7 +418,7 @@ def _ics_text(lines: list) -> str:
     return "\r\n".join(_fold(x) for x in lines) + "\r\n"
 
 
-def build_ics(schedule: dict, path: Path, alarm: int = 0, keep_all: bool = False) -> tuple[int, int]:
+def build_ics(schedule: dict, path: Path, alarm=None, keep_all: bool = False) -> tuple[int, int]:
     events, skipped = collect_events(schedule, keep_all)
     if not events:
         die("没有可导入的班次（全是休息或都已结束）")
@@ -383,8 +432,8 @@ def build_ics(schedule: dict, path: Path, alarm: int = 0, keep_all: bool = False
     return len(events), skipped
 
 
-def event_ics(e: dict, stamp: str) -> str:
-    return _ics_text(_calendar_header() + _event_lines(e, stamp) + ["END:VCALENDAR"])
+def event_ics(e: dict, stamp: str, alarm=None) -> str:
+    return _ics_text(_calendar_header() + _event_lines(e, stamp, alarm) + ["END:VCALENDAR"])
 
 
 # ---------------------------------------------------------------- CalDAV
@@ -493,7 +542,7 @@ def caldav_events(cal_url: str, user: str, pwd: str) -> dict:
     return out
 
 
-def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None) -> tuple[int, int, str]:
+def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None, alarm=None) -> tuple[int, int, str]:
     user, pwd, cal_name = caldav_config()
     cal_name = name or cal_name
     cal = caldav_calendar_url(user, pwd, cal_name)
@@ -506,7 +555,7 @@ def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None)
     for e in events:
         href = existing.get(e["uid"]) or urllib.parse.urljoin(
             cal, urllib.parse.quote(e["uid"], safe="@") + ".ics")
-        s, msg = _dav("PUT", href, event_ics(e, stamp), user, pwd,
+        s, msg = _dav("PUT", href, event_ics(e, stamp, alarm), user, pwd,
                       ctype="text/calendar; charset=utf-8")
         if s not in (200, 201, 204):
             die(f"写入 {e['day']} 失败：HTTP {s} {msg[:120]}")
@@ -524,7 +573,7 @@ def cmd_build(args) -> None:
     if not src.exists():
         die(f"找不到 {src}")
     schedule = json.loads(src.read_text(encoding="utf-8"))
-    kept, skipped = build_ics(schedule, Path(args.out), args.alarm, args.all)
+    kept, skipped = build_ics(schedule, Path(args.out), parse_alarm(args.alarm), args.all)
     note = f"，跳过 {skipped} 个已结束" if skipped else ""
     print(f"已生成 {args.out}：{kept} 个未结束的班次{note}", file=sys.stderr)
 
@@ -534,7 +583,7 @@ def cmd_sync(args) -> None:
     if not src.exists():
         die(f"找不到 {src}")
     schedule = json.loads(src.read_text(encoding="utf-8"))
-    puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None)
+    puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None, parse_alarm(args.alarm))
     note = f"，删除 {dels} 个过期" if dels else ""
     print(f"已同步 {puts} 个班次到 iCloud 日历「{name}」{note}", file=sys.stderr)
 
@@ -572,11 +621,11 @@ def cmd_publish(args) -> None:
     if not schedule_path.exists():
         die("没有 schedule.json")
     schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
-    kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", args.alarm, args.all)
+    kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
     note = f"（跳过 {skipped} 个已结束）" if skipped else ""
     print(f"日历：{kept} 个班次{note}", file=sys.stderr)
     if not args.no_caldav:
-        puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None)
+        puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None, parse_alarm(args.alarm))
         print(f"iCloud「{name}」：写入 {puts}，删除 {dels}", file=sys.stderr)
     if not args.no_git:
         _git_publish()
@@ -607,7 +656,7 @@ def cmd_update(args) -> None:
     if not schedule_path.exists():
         die("没有 schedule.json，无法生成")
     schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
-    kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", args.alarm, args.all)
+    kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
     note = f"，跳过 {skipped} 个已结束" if skipped else ""
     print(f"已生成 docs/schedule.ics：{kept} 个班次{note}", file=sys.stderr)
 
@@ -624,7 +673,7 @@ def main(argv=None) -> None:
     p = sub.add_parser("build", help="由 schedule.json 生成 .ics")
     p.add_argument("schedule", nargs="?", default="schedule.json")
     p.add_argument("-o", "--out", default="docs/schedule.ics")
-    p.add_argument("--alarm", type=int, default=0, help="提前多少分钟提醒，0=不提醒")
+    p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
     p.set_defaults(func=cmd_build)
 
@@ -632,7 +681,7 @@ def main(argv=None) -> None:
     p.add_argument("--no-git", action="store_true", help="不提交推送")
     p.add_argument("--no-caldav", action="store_true", help="不同步 iCloud")
     p.add_argument("--calendar", default="")
-    p.add_argument("--alarm", type=int, default=0)
+    p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true")
     p.set_defaults(func=cmd_publish)
 
@@ -646,7 +695,7 @@ def main(argv=None) -> None:
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("update", help="识别 images/ 下所有截图并重新生成")
-    p.add_argument("--alarm", type=int, default=0)
+    p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
     p.set_defaults(func=cmd_update)
 
