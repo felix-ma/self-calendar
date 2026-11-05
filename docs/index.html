@@ -50,6 +50,7 @@
   .ev .name{font-weight:600;font-size:14px}
   .ev .time{font-size:12px;color:var(--muted)}
   .ev .addr{font-size:12px;color:var(--muted);margin-top:1px}
+  .ev .meta{font-size:12px;color:var(--text);opacity:.75;margin-top:3px}
   .ev .nav{font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap}
   details{margin-top:4px;color:var(--muted);font-size:13px}
   summary{cursor:pointer;color:var(--text)}
@@ -90,6 +91,7 @@
       <li>Android：Google 日历网页版「其他日历 → 从网址添加」，填本页的 schedule.ics 地址</li>
       <li>只要一次性：点「下载 .ics」，用日历打开</li>
       <li>订阅会定期刷新，下载不会自动更新</li>
+      <li>提醒时间按通勤算：5 km 内电动车、更远打车</li>
     </ul>
   </details>
 
@@ -114,33 +116,44 @@ function parseICS(text){
     if (l.charAt(0) === " " && unfolded.length) unfolded[unfolded.length-1] += l.slice(1);
     else unfolded.push(l);
   }
-  var out = [], cur = null;
+  var out = [], cur = null, inAlarm = false;
   for (var j = 0; j < unfolded.length; j++){
     var line = unfolded[j];
-    if (line === "BEGIN:VEVENT"){ cur = {}; continue; }
-    if (line === "END:VEVENT"){ if (cur) out.push(cur); cur = null; continue; }
+    if (line === "BEGIN:VEVENT"){ cur = {}; inAlarm = false; continue; }
+    if (line === "END:VEVENT"){ if (cur) out.push(cur); cur = null; inAlarm = false; continue; }
+    if (line === "BEGIN:VALARM"){ inAlarm = true; continue; }
+    if (line === "END:VALARM"){ inAlarm = false; continue; }
     if (!cur) continue;
     var idx = line.indexOf(":");
     if (idx < 0) continue;
     var key = line.slice(0, idx).split(";")[0];
     var val = line.slice(idx + 1);
+    if (inAlarm){
+      if (key === "TRIGGER"){ var tm = /-PT(\d+)M/.exec(val); if (tm) cur.alarmMin = +tm[1]; }
+      continue;
+    }
     if (key === "DTSTART") cur.start = val;
     else if (key === "DTEND") cur.end = val;
     else if (key === "SUMMARY") cur.summary = unesc(val);
     else if (key === "LOCATION") cur.location = unesc(val);
     else if (key === "URL") cur.url = val;
+    else if (key === "DESCRIPTION") cur.description = unesc(val);
   }
   var events = [];
   for (var k = 0; k < out.length; k++){
     var e = out[k], m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(e.start || "");
     if (!m) continue;
     var e2 = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(e.end || "");
+    var cm = /通勤：(骑电动车|打车)\s*([\d.]+)\s*km/.exec(e.description || "");
     events.push({
       y:+m[1], mo:+m[2], d:+m[3], h:+m[4], mi:+m[5],
       eh: e2 ? +e2[4] : null, emi: e2 ? +e2[5] : null,
       summary: e.summary || "班次",
       location: e.location || "",
       url: e.url || "",
+      mode: cm ? cm[1] : "",
+      km: cm ? cm[2] : "",
+      alarmMin: e.alarmMin || 0,
       key: m[1] + "-" + m[2] + "-" + m[3]
     });
   }
@@ -251,6 +264,18 @@ function renderList(){
         addr.textContent = e.location;
         main.appendChild(addr);
       }
+      var meta = [];
+      if (e.mode) meta.push((e.mode === "打车" ? "\ud83d\ude95 " : "\ud83d\udef5 ") + e.mode + " " + e.km + " km");
+      if (e.alarmMin){
+        var t0 = (e.h * 60 + e.mi - e.alarmMin + 1440) % 1440;
+        meta.push("\ud83d\udd14 " + pad(Math.floor(t0 / 60)) + ":" + pad(t0 % 60) + " 提醒");
+      }
+      if (meta.length){
+        var metaEl = document.createElement("div");
+        metaEl.className = "meta";
+        metaEl.textContent = meta.join(" · ");
+        main.appendChild(metaEl);
+      }
       row.appendChild(bar);
       row.appendChild(main);
       if (e.url){
@@ -291,7 +316,7 @@ function boot(){
       if (EVENTS.length){
         view = new Date(EVENTS[0].y, EVENTS[0].mo - 1, 1);
         document.getElementById("sub").textContent =
-          "共 " + EVENTS.length + " 个未结束的班次 · 点有颜色的日期可跳转";
+          "共 " + EVENTS.length + " 个未结束的班次 · 提醒按通勤时间";
       } else {
         view = new Date(now.getFullYear(), now.getMonth(), 1);
         document.getElementById("sub").textContent = "暂无未结束的班次";
