@@ -37,6 +37,19 @@ python3 paiban.py update
 `update` 会读取 `images/` 下所有图片：有 Key 就重新识别，没有 Key 就沿用
 `schedule.json` 直接生成。生成完 `git push` 即可。
 
+## 一条命令
+
+```bash
+python3 paiban.py publish
+```
+
+依次完成：识别 `images/` → 生成 `docs/schedule.ics` → 同步 iCloud → 提交推送 GitHub。
+可加 `--no-caldav` / `--no-git` / `--all`。
+
+```bash
+python3 paiban.py status     # 看未结束的班次和仓库状态
+```
+
 ## 只保留未来的班次
 
 生成时按当前时间过滤：已经结束的班次不写进 `.ics`，所以文件一直很小。
