@@ -106,18 +106,16 @@ python3 paiban.py sync-caldav
 
 ## 提醒时间（按通勤算）
 
-`commute.json` 存起点、各家社康坐标和车程。生成时按
+`commute.json` 存起点、各家社康坐标和车程。**5 km 内骑电动车，更远打车**：
 
-```
-提前量 = 车程 × traffic_factor + buffer_min
-```
+- 电动车：`km / speed_kmh × 60 + extra_min`（默认 16 km/h，+5 分钟停车）
+- 打车：`OSRM 车程 × traffic_factor + extra_min`（默认 1.8 折算高峰，+8 分钟等车）
 
-取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，给每个事件单独加 `VALARM`，
-所以远的班次提醒早、近的提醒晚。
+结果取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，作为该事件 `VALARM` 的提前量。
+远的班次提醒早、近的提醒晚，事件备注里也会写「通勤：打车 13.2 km，预留 30 分钟」。
 
 - 起点：观澜·中航格澜郡（22.69389, 114.04109）
-- 车程来自 OSRM 路网，不含实时路况，默认乘 1.8 折算早高峰
-- 改 `traffic_factor`、`buffer_min` 或某家的 `drive_min` 后重新 `publish`
+- 改 `modes` 里的速度/系数，或某家的 `km` / `drive_min`，重新 `publish` 即生效
 - `--alarm off` 关闭，`--alarm 30` 统一提前 30 分钟
 
 ## 改班次时段
