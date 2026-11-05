@@ -294,17 +294,27 @@ def parse_alarm(v):
 
 
 def alarm_info(e: dict, fixed=None):
+    """返回 (提前分钟, 交通方式, 距离km)。5km 内电动车，更远打车。"""
     if fixed is not None:
-        return fixed, None
+        return fixed, "", 0.0
     c = load_commute()
     info = (c.get("stores") or {}).get(e["store"]) or {}
     if not info:
-        return 0, None
-    travel = float(info.get("drive_min") or 0)
-    base = travel * float(c.get("traffic_factor", 1.8)) + float(c.get("buffer_min", 10))
+        return 0, "", 0.0
+    km = float(info.get("km") or 0)
+    drive = float(info.get("drive_min") or 0)
+    modes = c.get("modes") or {}
+    eb = modes.get("ebike") or {}
+    tx = modes.get("taxi") or {}
+    if km <= float(eb.get("max_km", 5)):
+        label = eb.get("label", "电动车")
+        base = km / float(eb.get("speed_kmh", 16)) * 60 + float(eb.get("extra_min", 5))
+    else:
+        label = tx.get("label", "打车")
+        base = drive * float(tx.get("traffic_factor", 1.8)) + float(tx.get("extra_min", 8))
     minutes = int(round(base / 5.0)) * 5
     minutes = max(int(c.get("min_alarm", 15)), min(int(c.get("max_alarm", 180)), minutes))
-    return minutes, travel
+    return minutes, label, km
 
 
 def amap_search_url(keyword: str) -> str:
@@ -380,6 +390,7 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
     cfg, day, shift = e["cfg"], e["day"], e["shift"]
     store, full, addr = e["store"], e["full"], e["addr"]
     summary = shift + (f"·{store}" if store else "")
+    minutes, mode, km = alarm_info(e, fixed_alarm)
     desc = f"班次：{shift} {cfg['start']}-{cfg['end']}"
     if cfg.get("note"):
         desc += f"（{cfg['note']}）"
@@ -387,6 +398,8 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
         desc += f"\n门店：{full}"
         if addr:
             desc += f"\n地址：{addr}"
+    if minutes:
+        desc += f"\n通勤：{mode} {km:.1f} km，预留 {minutes} 分钟"
     lines = [
         "BEGIN:VEVENT",
         f"UID:{e['uid']}",
@@ -401,13 +414,10 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
         if addr:
             lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
     lines += [f"DESCRIPTION:{_esc(desc)}", "STATUS:CONFIRMED", "TRANSP:OPAQUE"]
-    minutes, travel = alarm_info(e, fixed_alarm)
     if minutes:
         label = "该出发了"
         if e["store"]:
-            label += f" · 到{e['store']}"
-            if travel:
-                label += f" 车程约 {int(round(travel))} 分钟"
+            label += f" · {mode}到{e['store']}"
         lines += ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes)}M", "ACTION:DISPLAY",
                   f"DESCRIPTION:{_esc(label)}", "END:VALARM"]
     lines.append("END:VEVENT")

@@ -4,8 +4,6 @@
     "lat": 22.69389,
     "lon": 114.04109
   },
-  "traffic_factor": 1.8,
-  "buffer_min": 10,
   "min_alarm": 15,
   "max_alarm": 180,
   "stores": {
@@ -39,6 +37,19 @@
       "lon": 114.01269,
       "km": 5.4,
       "drive_min": 5.5
+    }
+  },
+  "modes": {
+    "ebike": {
+      "max_km": 5,
+      "speed_kmh": 16,
+      "extra_min": 5,
+      "label": "骑电动车"
+    },
+    "taxi": {
+      "traffic_factor": 1.8,
+      "extra_min": 8,
+      "label": "打车"
     }
   }
 }

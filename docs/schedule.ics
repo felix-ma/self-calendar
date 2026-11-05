@@ -31,13 +31,14 @@ URL:https://uri.amap.com/search?keyword=%E6%B3%BD%E6%B6%A6%E7%A4%BE%E5%8C
  %BF%E5%9C%BA%E4%B8%80%E6%9C%9F%E4%B8%80%E5%B1%82&city=440300
 DESCRIPTION:班次：白班 08:00-17:00（8:00-12:00、14:00-17:00，12:0
  0-14:00 休息）\n门店：泽润社区健康服务中心\n地址：深
- 圳市龙华区龙华街道华联社区金龙华广场一期一层
+ 圳市龙华区龙华街道华联社区金龙华广场一期一层\n通
+ 勤：打车 5.4 km，预留 20 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
 TRIGGER:-PT20M
 ACTION:DISPLAY
-DESCRIPTION:该出发了 · 到泽润 车程约 6 分钟
+DESCRIPTION:该出发了 · 打车到泽润
 END:VALARM
 END:VEVENT
 BEGIN:VEVENT
@@ -56,13 +57,14 @@ URL:https://uri.amap.com/search?keyword=%E6%82%A6%E5%85%B4%E7%A4%BE%E5%8C
  165-173%E3%80%81175-177&city=440300
 DESCRIPTION:班次：早班 08:00-15:00\n门店：悦兴社区健康服
  务中心\n地址：深圳市龙华区福城街道悦兴路南侧华盛
- 观荟名庭半地下162-163、165-173、175-177
+ 观荟名庭半地下162-163、165-173、175-177\n通勤：骑电动车 3
+ .0 km，预留 15 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
 TRIGGER:-PT15M
 ACTION:DISPLAY
-DESCRIPTION:该出发了 · 到悦兴 车程约 3 分钟
+DESCRIPTION:该出发了 · 骑电动车到悦兴
 END:VALARM
 END:VEVENT
 BEGIN:VEVENT
@@ -80,13 +82,13 @@ URL:https://uri.amap.com/search?keyword=%E5%8D%8E%E9%94%A6%E7%A4%BE%E5%8C
  L1S-037F&city=440300
 DESCRIPTION:班次：早班 08:00-15:00\n门店：华锦社区健康服
  务中心\n地址：深圳市龙华区民治街道梅龙路2号星河COCO
-  City L1S-037F
+  City L1S-037F\n通勤：打车 13.2 km，预留 30 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
-TRIGGER:-PT35M
+TRIGGER:-PT30M
 ACTION:DISPLAY
-DESCRIPTION:该出发了 · 到华锦 车程约 13 分钟
+DESCRIPTION:该出发了 · 打车到华锦
 END:VALARM
 END:VEVENT
 BEGIN:VEVENT
@@ -104,13 +106,13 @@ URL:https://uri.amap.com/search?keyword=%E5%92%8C%E9%A3%8E%E7%A4%BE%E5%8C
  A5%BC101-105&city=440300
 DESCRIPTION:班次：早班 08:00-15:00\n门店：和风社区健康服
  务中心\n地址：深圳市龙华区民治街道民乐村商住楼9栋1
- 楼101-105
+ 楼101-105\n通勤：打车 11.8 km，预留 30 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
-TRIGGER:-PT35M
+TRIGGER:-PT30M
 ACTION:DISPLAY
-DESCRIPTION:该出发了 · 到和风 车程约 13 分钟
+DESCRIPTION:该出发了 · 打车到和风
 END:VALARM
 END:VEVENT
 END:VCALENDAR
