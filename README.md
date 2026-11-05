@@ -104,6 +104,22 @@ python3 paiban.py sync-caldav
 
 地址来自公开信息，如与实际不符，改 `places.json` 后重新 `build` 即可。
 
+## 提醒时间（按通勤算）
+
+`commute.json` 存起点、各家社康坐标和车程。生成时按
+
+```
+提前量 = 车程 × traffic_factor + buffer_min
+```
+
+取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，给每个事件单独加 `VALARM`，
+所以远的班次提醒早、近的提醒晚。
+
+- 起点：观澜·中航格澜郡（22.69389, 114.04109）
+- 车程来自 OSRM 路网，不含实时路况，默认乘 1.8 折算早高峰
+- 改 `traffic_factor`、`buffer_min` 或某家的 `drive_min` 后重新 `publish`
+- `--alarm off` 关闭，`--alarm 30` 统一提前 30 分钟
+
 ## 改班次时段
 
 时段写在 `paiban.py` 顶部的 `SHIFTS` 里：
