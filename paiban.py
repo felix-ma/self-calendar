@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -538,6 +539,62 @@ def cmd_sync(args) -> None:
     print(f"已同步 {puts} 个班次到 iCloud 日历「{name}」{note}", file=sys.stderr)
 
 
+def _git_publish() -> None:
+    if not (ROOT / ".git").exists():
+        print("提示：不是 git 仓库，跳过推送", file=sys.stderr)
+        return
+    def run(*a):
+        return subprocess.run(a, cwd=ROOT, capture_output=True, text=True)
+    run("git", "add", "-A")
+    if run("git", "diff", "--cached", "--quiet").returncode == 0:
+        print("仓库无变化，跳过提交", file=sys.stderr)
+        return
+    r = run("git", "commit", "-m", "chore: 更新排班 " + date.today().isoformat())
+    if r.returncode != 0:
+        print("提交失败：" + (r.stderr or r.stdout).strip()[:200], file=sys.stderr)
+        return
+    r = run("git", "push", "origin", "main")
+    if r.returncode == 0:
+        print("已推送 GitHub", file=sys.stderr)
+    else:
+        print("推送失败：" + (r.stderr or r.stdout).strip()[:200], file=sys.stderr)
+
+
+def cmd_publish(args) -> None:
+    schedule_path = ROOT / "schedule.json"
+    images = sorted(ROOT.glob("images/*.png")) + sorted(ROOT.glob("images/*.jpg"))
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if images and key:
+        cmd_recognize(argparse.Namespace(images=[str(p) for p in images],
+                                         out=str(schedule_path)))
+    elif images:
+        print("提示：未设置 DEEPSEEK_API_KEY，跳过识别", file=sys.stderr)
+    if not schedule_path.exists():
+        die("没有 schedule.json")
+    schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
+    kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", args.alarm, args.all)
+    note = f"（跳过 {skipped} 个已结束）" if skipped else ""
+    print(f"日历：{kept} 个班次{note}", file=sys.stderr)
+    if not args.no_caldav:
+        puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None)
+        print(f"iCloud「{name}」：写入 {puts}，删除 {dels}", file=sys.stderr)
+    if not args.no_git:
+        _git_publish()
+
+
+def cmd_status(args) -> None:
+    schedule = json.loads((ROOT / "schedule.json").read_text(encoding="utf-8"))
+    events, _ = collect_events(schedule, False)
+    if not events:
+        print("没有未结束的班次")
+        return
+    for e in events:
+        print(f"{e['day']}  {e['shift']}  {e['cfg']['start']}-{e['cfg']['end']}  {e['store']}")
+    print(f"\n共 {len(events)} 个未结束班次")
+    r = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
+    print("仓库有未提交改动" if r.stdout.strip() else "仓库干净")
+
+
 def cmd_update(args) -> None:
     images = sorted(ROOT.glob("images/*.png")) + sorted(ROOT.glob("images/*.jpg"))
     key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
@@ -570,6 +627,17 @@ def main(argv=None) -> None:
     p.add_argument("--alarm", type=int, default=0, help="提前多少分钟提醒，0=不提醒")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
     p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("publish", help="识别 + 生成 + 同步 iCloud + 推送 GitHub")
+    p.add_argument("--no-git", action="store_true", help="不提交推送")
+    p.add_argument("--no-caldav", action="store_true", help="不同步 iCloud")
+    p.add_argument("--calendar", default="")
+    p.add_argument("--alarm", type=int, default=0)
+    p.add_argument("--all", action="store_true")
+    p.set_defaults(func=cmd_publish)
+
+    p = sub.add_parser("status", help="查看未结束的班次")
+    p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("sync-caldav", help="同步到 iCloud 日历")
     p.add_argument("schedule", nargs="?", default="schedule.json")
