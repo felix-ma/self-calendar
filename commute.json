@@ -36,7 +36,8 @@
       "lat": 22.6645,
       "lon": 114.01269,
       "km": 5.4,
-      "drive_min": 5.5
+      "drive_min": 5.5,
+      "mode": "ebike"
     }
   },
   "modes": {

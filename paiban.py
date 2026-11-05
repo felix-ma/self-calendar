@@ -306,7 +306,9 @@ def alarm_info(e: dict, fixed=None):
     modes = c.get("modes") or {}
     eb = modes.get("ebike") or {}
     tx = modes.get("taxi") or {}
-    if km <= float(eb.get("max_km", 5)):
+    forced = (info.get("mode") or "").strip()
+    use_ebike = forced == "ebike" or (not forced and km <= float(eb.get("max_km", 5)))
+    if use_ebike:
         label = eb.get("label", "电动车")
         base = km / float(eb.get("speed_kmh", 16)) * 60 + float(eb.get("extra_min", 5))
     else:

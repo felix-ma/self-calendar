@@ -32,13 +32,13 @@ URL:https://uri.amap.com/search?keyword=%E6%B3%BD%E6%B6%A6%E7%A4%BE%E5%8C
 DESCRIPTION:班次：白班 08:00-17:00（8:00-12:00、14:00-17:00，12:0
  0-14:00 休息）\n门店：泽润社区健康服务中心\n地址：深
  圳市龙华区龙华街道华联社区金龙华广场一期一层\n通
- 勤：打车 5.4 km，预留 20 分钟
+ 勤：骑电动车 5.4 km，预留 25 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
-TRIGGER:-PT20M
+TRIGGER:-PT25M
 ACTION:DISPLAY
-DESCRIPTION:该出发了 · 打车到泽润
+DESCRIPTION:该出发了 · 骑电动车到泽润
 END:VALARM
 END:VEVENT
 BEGIN:VEVENT

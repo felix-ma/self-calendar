@@ -116,6 +116,7 @@ python3 paiban.py sync-caldav
 
 - 起点：观澜·中航格澜郡（22.69389, 114.04109）
 - 改 `modes` 里的速度/系数，或某家的 `km` / `drive_min`，重新 `publish` 即生效
+- 某家想固定方式：在该门店加 `"mode": "ebike"` 或 `"taxi"`（泽润就是手动的）
 - `--alarm off` 关闭，`--alarm 30` 统一提前 30 分钟
 
 ## 改班次时段
