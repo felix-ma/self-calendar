@@ -64,6 +64,26 @@ python3 paiban.py build --all
 - 订阅的刷新有延迟：Google 几小时，iOS 按上面设置
 - 订阅链接必须公开可访问
 
+## 同步到 iCloud（CalDAV）
+
+除了生成 `.ics`，也可以直接写进 iCloud 日历。凭据只放本机，不进仓库：
+
+```bash
+mkdir -p ~/.config/paiban
+cat > ~/.config/paiban/caldav.env <<'EOF'
+ICLOUD_USER=你的 Apple ID
+ICLOUD_PASS=App 专用密码
+ICLOUD_CAL=排班表
+EOF
+chmod 600 ~/.config/paiban/caldav.env
+
+python3 paiban.py sync-caldav
+```
+
+同步按 UID 增删改：新班次写入、改班次覆盖、过期的删除；
+只动 UID 以 `@paiban2ics` 结尾的事件，不会碰日历里别的事件。
+默认只同步未结束的班次，加 `--all` 可连历史一起写。
+
 ## 地址与导航
 
 `places.json` 里是各社康的全称和地址，生成时会写进日历的 `LOCATION`，

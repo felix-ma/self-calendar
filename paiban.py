@@ -20,6 +20,8 @@ import re
 import sys
 import urllib.error
 import urllib.parse
+import uuid
+import xml.etree.ElementTree as ET
 import urllib.request
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
@@ -266,11 +268,49 @@ def amap_search_url(keyword: str) -> str:
             + urllib.parse.quote(keyword, safe="") + "&city=440300")
 
 
-def build_ics(schedule: dict, path: Path, alarm: int = 0, keep_all: bool = False) -> tuple[int, int]:
+def _stamp(schedule: dict) -> str:
+    """用识别时间做 DTSTAMP，保证同一份数据生成结果一致。"""
+    gen = schedule.get("generated_at")
+    if gen:
+        try:
+            return datetime.fromisoformat(gen).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def collect_events(schedule: dict, keep_all: bool = False) -> tuple[list, int]:
     days = [d for d in schedule.get("days", []) if d.get("shift") != "休息"]
-    if not days:
-        die("没有可导入的班次（全是休息）")
-    lines = [
+    places = load_places()
+    now = datetime.now(TZOFF)
+    out, skipped = [], 0
+    for d in sorted(days, key=lambda x: (x["date"], x["shift"])):
+        shift = d["shift"]
+        cfg = SHIFTS.get(shift)
+        if not cfg:
+            continue
+        day = date.fromisoformat(d["date"])
+        start_dt = datetime.combine(day, dtime.fromisoformat(cfg["start"]), tzinfo=TZOFF)
+        end_dt = datetime.combine(day, dtime.fromisoformat(cfg["end"]), tzinfo=TZOFF)
+        if not keep_all and end_dt <= now:
+            skipped += 1
+            continue
+        store = d.get("store", "") or ""
+        place = places.get(store, {})
+        out.append({
+            "day": day,
+            "shift": shift,
+            "cfg": cfg,
+            "store": store,
+            "full": place.get("full") or (store + "社康" if store else ""),
+            "addr": place.get("address", ""),
+            "uid": hashlib.sha1(f"{d['date']}|{shift}|{store}".encode()).hexdigest()[:20] + "@paiban2ics",
+        })
+    return out, skipped
+
+
+def _calendar_header() -> list:
+    return [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//paiban2ics//DeepSeek Vision//CN",
@@ -290,77 +330,192 @@ def build_ics(schedule: dict, path: Path, alarm: int = 0, keep_all: bool = False
         "END:STANDARD",
         "END:VTIMEZONE",
     ]
-    places = load_places()
-    # 用识别时间做 DTSTAMP，保证同一份 schedule.json 生成的 .ics 完全一致，
-    # 避免 Actions 每次运行都产生一次无意义的改动提交。
-    gen = schedule.get("generated_at")
-    if gen:
-        try:
-            stamp = datetime.fromisoformat(gen).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        except ValueError:
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    else:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    now = datetime.now(TZOFF)
-    kept = skipped = 0
-    for d in sorted(days, key=lambda x: (x["date"], x["shift"])):
-        shift = d["shift"]
-        cfg = SHIFTS.get(shift)
-        if not cfg:
-            continue
-        day = date.fromisoformat(d["date"])
-        start_dt = datetime.combine(day, dtime.fromisoformat(cfg["start"]), tzinfo=TZOFF)
-        end_dt = datetime.combine(day, dtime.fromisoformat(cfg["end"]), tzinfo=TZOFF)
-        if not keep_all and end_dt <= now:
-            skipped += 1
-            continue
-        kept += 1
-        uid_src = f"{d['date']}|{shift}|{d.get('store','')}"
-        uid = hashlib.sha1(uid_src.encode()).hexdigest()[:20] + "@paiban2ics"
-        store = d.get("store", "")
-        place = places.get(store, {})
-        full = place.get("full") or (store + "社康" if store else "")
-        addr = place.get("address", "")
-        summary = shift + (f"·{store}" if store else "")
-        desc = f"班次：{shift} {cfg['start']}-{cfg['end']}"
-        if cfg.get("note"):
-            desc += f"（{cfg['note']}）"
-        if store:
-            desc += f"\n门店：{full}"
-            if addr:
-                desc += f"\n地址：{addr}"
-        lines += [
-            "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTAMP:{stamp}",
-            f"DTSTART;TZID={TZID}:{day.strftime('%Y%m%d')}T{_hm(cfg['start'])}",
-            f"DTEND;TZID={TZID}:{day.strftime('%Y%m%d')}T{_hm(cfg['end'])}",
-            f"SUMMARY:{_esc(summary)}",
-        ]
-        if store:
-            loc = f"{full}，{addr}" if addr else full
-            lines.append(f"LOCATION:{_esc(loc)}")
-            if addr:
-                lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
-        lines += [
-            f"DESCRIPTION:{_esc(desc)}",
-            "STATUS:CONFIRMED",
-            "TRANSP:OPAQUE",
-        ]
-        if alarm:
-            lines += [
-                "BEGIN:VALARM",
-                "TRIGGER:-PT%dM" % int(alarm),
-                "ACTION:DISPLAY",
-                f"DESCRIPTION:{_esc(summary)}",
-                "END:VALARM",
-            ]
-        lines.append("END:VEVENT")
+
+
+def _event_lines(e: dict, stamp: str, alarm: int = 0) -> list:
+    cfg, day, shift = e["cfg"], e["day"], e["shift"]
+    store, full, addr = e["store"], e["full"], e["addr"]
+    summary = shift + (f"·{store}" if store else "")
+    desc = f"班次：{shift} {cfg['start']}-{cfg['end']}"
+    if cfg.get("note"):
+        desc += f"（{cfg['note']}）"
+    if store:
+        desc += f"\n门店：{full}"
+        if addr:
+            desc += f"\n地址：{addr}"
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{e['uid']}",
+        f"DTSTAMP:{stamp}",
+        f"DTSTART;TZID={TZID}:{day.strftime('%Y%m%d')}T{_hm(cfg['start'])}",
+        f"DTEND;TZID={TZID}:{day.strftime('%Y%m%d')}T{_hm(cfg['end'])}",
+        f"SUMMARY:{_esc(summary)}",
+    ]
+    if store:
+        loc = f"{full}，{addr}" if addr else full
+        lines.append(f"LOCATION:{_esc(loc)}")
+        if addr:
+            lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
+    lines += [f"DESCRIPTION:{_esc(desc)}", "STATUS:CONFIRMED", "TRANSP:OPAQUE"]
+    if alarm:
+        lines += ["BEGIN:VALARM", "TRIGGER:-PT%dM" % int(alarm), "ACTION:DISPLAY",
+                  f"DESCRIPTION:{_esc(summary)}", "END:VALARM"]
+    lines.append("END:VEVENT")
+    return lines
+
+
+def _ics_text(lines: list) -> str:
+    return "\r\n".join(_fold(x) for x in lines) + "\r\n"
+
+
+def build_ics(schedule: dict, path: Path, alarm: int = 0, keep_all: bool = False) -> tuple[int, int]:
+    events, skipped = collect_events(schedule, keep_all)
+    if not events:
+        die("没有可导入的班次（全是休息或都已结束）")
+    lines = _calendar_header()
+    stamp = _stamp(schedule)
+    for e in events:
+        lines += _event_lines(e, stamp, alarm)
     lines.append("END:VCALENDAR")
-    body = "\r\n".join(_fold(x) for x in lines) + "\r\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8", newline="")
-    return kept, skipped
+    path.write_text(_ics_text(lines), encoding="utf-8", newline="")
+    return len(events), skipped
+
+
+def event_ics(e: dict, stamp: str) -> str:
+    return _ics_text(_calendar_header() + _event_lines(e, stamp) + ["END:VCALENDAR"])
+
+
+# ---------------------------------------------------------------- CalDAV
+CALDAV_ENV = Path.home() / ".config" / "paiban" / "caldav.env"
+NS = {"D": "DAV:", "C": "urn:ietf:params:xml:ns:caldav"}
+_PRINCIPAL_XML = ('<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:">'
+                  '<D:prop><D:current-user-principal/></D:prop></D:propfind>')
+_HOME_XML = ('<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" '
+             'xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><C:calendar-home-set/>'
+             '</D:prop></D:propfind>')
+_LIST_XML = ('<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" '
+             'xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:displayname/>'
+             '<D:resourcetype/></D:prop></D:propfind>')
+_REPORT_XML = ('<?xml version="1.0" encoding="utf-8"?><C:calendar-query xmlns:D="DAV:" '
+               'xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/>'
+               '<C:calendar-data/></D:prop><C:filter><C:comp-filter name="VCALENDAR"/>'
+               '</C:filter></C:calendar-query>')
+
+
+def _read_env_file(path: Path) -> dict:
+    d = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip()
+    return d
+
+
+def caldav_config() -> tuple[str, str, str]:
+    conf = _read_env_file(CALDAV_ENV)
+    user = os.environ.get("ICLOUD_USER") or conf.get("ICLOUD_USER", "")
+    pwd = os.environ.get("ICLOUD_PASS") or conf.get("ICLOUD_PASS", "")
+    name = os.environ.get("ICLOUD_CAL") or conf.get("ICLOUD_CAL", "") or "排班表"
+    if not user or not pwd:
+        die(f"没有 CalDAV 凭据：设置 ICLOUD_USER / ICLOUD_PASS，或写入 {CALDAV_ENV}")
+    return user, pwd, name
+
+
+def _dav(method: str, url: str, body: str | None, user: str, pwd: str,
+         depth: str = "0", ctype: str = "application/xml; charset=utf-8", timeout: int = 60):
+    auth = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+    headers = {"Authorization": "Basic " + auth, "User-Agent": "paiban2ics/1.0", "Depth": depth}
+    if body is not None:
+        headers["Content-Type"] = ctype
+    req = urllib.request.Request(url, data=body.encode("utf-8") if body is not None else None,
+                                 headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")[:400]
+    except urllib.error.URLError as e:
+        die(f"连不上 CalDAV：{e.reason}")
+
+
+def caldav_calendar_url(user: str, pwd: str, name: str, create: bool = True) -> str:
+    base = "https://caldav.icloud.com"
+    s, b = _dav("PROPFIND", base + "/", _PRINCIPAL_XML, user, pwd)
+    if s not in (200, 207):
+        die(f"CalDAV 认证失败：HTTP {s}")
+    href = ET.fromstring(b).find(".//D:current-user-principal/D:href", NS)
+    if href is None:
+        die("找不到日历账户（current-user-principal）")
+    s, b = _dav("PROPFIND", urllib.parse.urljoin(base + "/", href.text), _HOME_XML, user, pwd)
+    home = ET.fromstring(b).find(".//C:calendar-home-set/D:href", NS)
+    if home is None:
+        die("找不到日历主目录（calendar-home-set）")
+    home_url = urllib.parse.urljoin(base + "/", home.text)
+    s, b = _dav("PROPFIND", home_url, _LIST_XML, user, pwd, depth="1")
+    if s not in (200, 207):
+        die(f"读取日历列表失败：HTTP {s}")
+    for resp in ET.fromstring(b).findall("D:response", NS):
+        disp = resp.find(".//D:displayname", NS)
+        h = resp.find("D:href", NS)
+        if disp is not None and h is not None and (disp.text or "").strip() == name:
+            return urllib.parse.urljoin(home_url, h.text)
+    if not create:
+        die(f"iCloud 里没有名为「{name}」的日历")
+    new_url = urllib.parse.urljoin(home_url, str(uuid.uuid4()).upper() + "/")
+    body = ('<?xml version="1.0" encoding="utf-8"?><C:mkcalendar xmlns:D="DAV:" '
+            'xmlns:C="urn:ietf:params:xml:ns:caldav"><D:set><D:prop>'
+            f'<D:displayname>{_esc(name)}</D:displayname>'
+            '<C:supported-calendar-component-set><C:comp name="VEVENT"/>'
+            '</C:supported-calendar-component-set></D:prop></D:set></C:mkcalendar>')
+    s, _ = _dav("MKCALENDAR", new_url, body, user, pwd)
+    if s not in (200, 201):
+        die(f"创建日历「{name}」失败：HTTP {s}")
+    return new_url
+
+
+def caldav_events(cal_url: str, user: str, pwd: str) -> dict:
+    s, b = _dav("REPORT", cal_url, _REPORT_XML, user, pwd, depth="1")
+    if s not in (200, 207):
+        die(f"读取日历事件失败：HTTP {s}")
+    out = {}
+    for resp in ET.fromstring(b).findall("D:response", NS):
+        h = resp.find("D:href", NS)
+        data = resp.find(".//C:calendar-data", NS)
+        if h is None or data is None or not data.text:
+            continue
+        m = re.search(r"UID:([^\r\n]+)", data.text)
+        if m:
+            out[m.group(1).strip()] = urllib.parse.urljoin(cal_url, h.text)
+    return out
+
+
+def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None) -> tuple[int, int, str]:
+    user, pwd, cal_name = caldav_config()
+    cal_name = name or cal_name
+    cal = caldav_calendar_url(user, pwd, cal_name)
+    events, _ = collect_events(schedule, keep_all)
+    if not events:
+        die("没有要同步的班次")
+    stamp = _stamp(schedule)
+    existing = caldav_events(cal, user, pwd)
+    puts = dels = 0
+    for e in events:
+        href = existing.get(e["uid"]) or urllib.parse.urljoin(
+            cal, urllib.parse.quote(e["uid"], safe="@") + ".ics")
+        s, msg = _dav("PUT", href, event_ics(e, stamp), user, pwd,
+                      ctype="text/calendar; charset=utf-8")
+        if s not in (200, 201, 204):
+            die(f"写入 {e['day']} 失败：HTTP {s} {msg[:120]}")
+        puts += 1
+    for uid, href in existing.items():
+        if uid not in {e["uid"] for e in events} and uid.endswith("@paiban2ics"):
+            s, _ = _dav("DELETE", href, None, user, pwd)
+            if s in (200, 204, 404):
+                dels += 1
+    return puts, dels, cal_name
 
 
 def cmd_build(args) -> None:
@@ -371,6 +526,16 @@ def cmd_build(args) -> None:
     kept, skipped = build_ics(schedule, Path(args.out), args.alarm, args.all)
     note = f"，跳过 {skipped} 个已结束" if skipped else ""
     print(f"已生成 {args.out}：{kept} 个未结束的班次{note}", file=sys.stderr)
+
+
+def cmd_sync(args) -> None:
+    src = Path(args.schedule)
+    if not src.exists():
+        die(f"找不到 {src}")
+    schedule = json.loads(src.read_text(encoding="utf-8"))
+    puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None)
+    note = f"，删除 {dels} 个过期" if dels else ""
+    print(f"已同步 {puts} 个班次到 iCloud 日历「{name}」{note}", file=sys.stderr)
 
 
 def cmd_update(args) -> None:
@@ -405,6 +570,12 @@ def main(argv=None) -> None:
     p.add_argument("--alarm", type=int, default=0, help="提前多少分钟提醒，0=不提醒")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
     p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("sync-caldav", help="同步到 iCloud 日历")
+    p.add_argument("schedule", nargs="?", default="schedule.json")
+    p.add_argument("--calendar", default="", help="日历名称，默认读 ICLOUD_CAL")
+    p.add_argument("--all", action="store_true", help="包含已结束的班次")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("update", help="识别 images/ 下所有截图并重新生成")
     p.add_argument("--alarm", type=int, default=0)
