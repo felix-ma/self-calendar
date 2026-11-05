@@ -3,83 +3,307 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f6f8">
 <title>排班日历</title>
 <style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    font: 16px/1.6 -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
-    background: #f5f6f8; color: #1b1f24; padding: 24px;
+  :root{
+    --bg:#f5f6f8; --card:#fff; --text:#1b1f24; --muted:#6b7480; --line:#e8ebf0;
+    --early:#2e7d32; --late:#ef6c00; --day:#c2185b; --accent:#1a73e8; --tint:rgba(26,115,232,.07);
   }
-  @media (prefers-color-scheme: dark) {
-    body { background: #14171b; color: #e8eaed; }
-    .card { background: #1e2329 !important; box-shadow: none !important; }
-    .muted { color: #9aa3ad !important; }
-    .btn { background: #2f6fed !important; }
-    li code { background: #2a3038 !important; }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#14171b;--card:#1e2329;--text:#e8eaed;--muted:#9aa3ad;--line:#2a3038;--tint:rgba(138,180,248,.12);--accent:#8ab4f8}
   }
-  .card {
-    width: 100%; max-width: 420px; background: #fff; border-radius: 20px;
-    padding: 28px 24px; box-shadow: 0 10px 40px rgba(20, 30, 50, .08);
-  }
-  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .5px; }
-  .sub { font-size: 14px; color: #6b7480; margin: 0 0 22px; }
-  .btn {
-    display: block; text-align: center; text-decoration: none; color: #fff;
-    background: #1a73e8; border-radius: 14px; padding: 15px 16px; font-size: 17px;
-    font-weight: 600; margin: 8px 0 18px;
-  }
-  .btn:active { opacity: .85; }
-  .btn.sub { background: transparent; color: #1a73e8; border: 1.5px solid #1a73e8; }
-  @media (prefers-color-scheme: dark) { .btn.sub { color: #8ab4f8; border-color: #8ab4f8; } }
-  .hint { font-size: 12px; color: #8b949e; margin: -10px 0 16px; text-align: center; }
-  h2 { font-size: 14px; margin: 22px 0 8px; color: #6b7480; font-weight: 600; }
-  ul { margin: 0; padding-left: 20px; }
-  li { margin: 4px 0; font-size: 14px; }
-  code { background: #eef1f5; border-radius: 5px; padding: 1px 5px; font-size: 13px; }
-  .foot { margin-top: 24px; font-size: 12px; color: #8b949e; text-align: center; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.6 -apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:480px;margin:0 auto;padding:22px 16px 40px}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+  .actions{display:flex;gap:8px;margin-bottom:16px}
+  .btn{flex:1;text-align:center;text-decoration:none;border-radius:12px;padding:11px 8px;
+    font-weight:600;font-size:15px;background:var(--accent);color:#fff;border:0;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+  .card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:16px}
+  .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .cal-head button{background:none;border:0;font-size:20px;color:var(--muted);padding:4px 12px;cursor:pointer}
+  .cal-title{font-weight:600;font-size:15px}
+  .week{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;
+    color:var(--muted);font-size:12px;margin-bottom:6px}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .cell{min-height:50px;border-radius:9px;padding:4px 4px 3px;position:relative}
+  .cell.empty{visibility:hidden}
+  .cell.has{background:var(--tint);cursor:pointer}
+  .cell .d{font-size:11px;color:var(--muted)}
+  .cell.today .d{color:#fff;background:var(--accent);border-radius:50%;
+    width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center}
+  .dots{display:flex;gap:3px;margin-top:3px;flex-wrap:wrap}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.early{background:var(--early)} .dot.late{background:var(--late)} .dot.day{background:var(--day)}
+  .list h2{font-size:13px;color:var(--muted);margin:0 0 6px;font-weight:600}
+  .gdate{font-size:12px;color:var(--muted);margin:12px 0 2px}
+  .gdate:first-child{margin-top:0}
+  .ev{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .ev:last-child{border-bottom:0}
+  .bar{width:4px;border-radius:2px;background:var(--muted);flex:none}
+  .bar.early{background:var(--early)} .bar.late{background:var(--late)} .bar.day{background:var(--day)}
+  .ev .main{flex:1;min-width:0}
+  .ev .name{font-weight:600;font-size:14px}
+  .ev .time{font-size:12px;color:var(--muted)}
+  .ev .addr{font-size:12px;color:var(--muted);margin-top:1px}
+  .ev .nav{font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap}
+  details{margin-top:4px;color:var(--muted);font-size:13px}
+  summary{cursor:pointer;color:var(--text)}
+  details ul{padding-left:18px}
+  .foot{text-align:center;color:var(--muted);font-size:12px;margin-top:14px}
+  .state{color:var(--muted);text-align:center;padding:10px 0}
 </style>
 </head>
 <body>
-  <main class="card">
-    <h1>排班日历</h1>
-    <p class="sub">只含今天及以后还没结束的班次</p>
+<div class="wrap">
+  <h1>排班日历</h1>
+  <p class="sub" id="sub">正在读取…</p>
 
-    <a class="btn" href="schedule.ics" download>下载 schedule.ics</a>
-    <a class="btn sub" href="schedule.ics" id="subscribe">订阅日历（自动同步）</a>
-    <p class="hint">订阅后 GitHub 更新会自动同步；下载导入是一次性复制。</p>
+  <div class="actions">
+    <a class="btn" id="subscribe" href="schedule.ics">订阅（自动同步）</a>
+    <a class="btn ghost" href="schedule.ics" download>下载 .ics</a>
+  </div>
 
-    <h2>导入 iPhone</h2>
+  <div class="card">
+    <div class="cal-head">
+      <button id="prev" aria-label="上个月">‹</button>
+      <div class="cal-title" id="title"></div>
+      <button id="next" aria-label="下个月">›</button>
+    </div>
+    <div class="week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="card list">
+    <h2>接下来的班次</h2>
+    <div id="events"><div class="state">读取中…</div></div>
+  </div>
+
+  <details>
+    <summary>怎么订阅 / 导入</summary>
     <ul>
-      <li>用 Safari 打开本页，点上面的按钮</li>
-      <li>下载完成后点「日历」图标，选「添加全部」</li>
-      <li>或在「文件」里点开 .ics，选择「日历」</li>
-      <li>事件里带社康地址，点地点即可导航</li>
+      <li>iPhone：Safari 点上面的「订阅」，或打开 <code>webcal://</code> 链接</li>
+      <li>Android：Google 日历网页版「其他日历 → 从网址添加」，填本页的 schedule.ics 地址</li>
+      <li>只要一次性：点「下载 .ics」，用日历打开</li>
+      <li>订阅会定期刷新，下载不会自动更新</li>
     </ul>
+  </details>
 
-    <h2>导入 Android</h2>
-    <ul>
-      <li>用 Chrome 打开本页，点上面的按钮下载</li>
-      <li>点通知或「文件」里的 schedule.ics</li>
-      <li>选择「日历」或「Google 日历」导入</li>
-    </ul>
+  <p class="foot">时间为北京时间 · 只显示未结束的班次</p>
+</div>
 
-    <h2>分享给同事</h2>
-    <ul>
-      <li>把 <code>schedule.ics</code> 直接发微信 / 邮件</li>
-      <li>对方点开文件即可导入日历</li>
-    </ul>
+<script>
+"use strict";
+var WEEK = ["周日","周一","周二","周三","周四","周五","周六"];
+var COLOR = {"早班":"early","晚班":"late","白班":"day"};
+var EVENTS = [];
+var view = null;
 
-    <p class="foot">由 paiban.py 识别截图自动生成</p>
-  </main>
-  <script>
-    document.getElementById('subscribe').addEventListener('click', function (e) {
-      e.preventDefault();
-      var u = new URL('schedule.ics', location.href);
-      if (!u.host) return;
-      location.href = 'webcal://' + u.host + u.pathname;
+function unesc(s){
+  return s.replace(/\\n/g, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+}
+function parseICS(text){
+  var lines = text.replace(/\r\n/g, "\n").split("\n");
+  var unfolded = [];
+  for (var i = 0; i < lines.length; i++){
+    var l = lines[i];
+    if (l.charAt(0) === " " && unfolded.length) unfolded[unfolded.length-1] += l.slice(1);
+    else unfolded.push(l);
+  }
+  var out = [], cur = null;
+  for (var j = 0; j < unfolded.length; j++){
+    var line = unfolded[j];
+    if (line === "BEGIN:VEVENT"){ cur = {}; continue; }
+    if (line === "END:VEVENT"){ if (cur) out.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    var idx = line.indexOf(":");
+    if (idx < 0) continue;
+    var key = line.slice(0, idx).split(";")[0];
+    var val = line.slice(idx + 1);
+    if (key === "DTSTART") cur.start = val;
+    else if (key === "DTEND") cur.end = val;
+    else if (key === "SUMMARY") cur.summary = unesc(val);
+    else if (key === "LOCATION") cur.location = unesc(val);
+    else if (key === "URL") cur.url = val;
+  }
+  var events = [];
+  for (var k = 0; k < out.length; k++){
+    var e = out[k], m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(e.start || "");
+    if (!m) continue;
+    var e2 = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(e.end || "");
+    events.push({
+      y:+m[1], mo:+m[2], d:+m[3], h:+m[4], mi:+m[5],
+      eh: e2 ? +e2[4] : null, emi: e2 ? +e2[5] : null,
+      summary: e.summary || "班次",
+      location: e.location || "",
+      url: e.url || "",
+      key: m[1] + "-" + m[2] + "-" + m[3]
     });
-  </script>
+  }
+  events.sort(function(a,b){
+    if (a.key !== b.key) return a.key < b.key ? -1 : 1;
+    return (a.h * 60 + a.mi) - (b.h * 60 + b.mi);
+  });
+  return events;
+}
+function pad(n){ return (n < 10 ? "0" : "") + n; }
+function shiftColor(summary){
+  var k = summary.charAt(0) + summary.charAt(1);
+  return COLOR[k] || "early";
+}
+function sameDay(dt, y, mo, d){
+  return dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d;
+}
+function render(){
+  var y = view.getFullYear(), mo = view.getMonth();
+  document.getElementById("title").textContent = y + "年" + (mo + 1) + "月";
+  var grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  var first = new Date(y, mo, 1);
+  var start = (first.getDay() + 6) % 7;
+  var days = new Date(y, mo + 1, 0).getDate();
+  var byDay = {};
+  for (var i = 0; i < EVENTS.length; i++){
+    var e = EVENTS[i];
+    if (e.y === y && e.mo === mo + 1){
+      (byDay[e.d] = byDay[e.d] || []).push(e);
+    }
+  }
+  var today = new Date();
+  for (var s = 0; s < start; s++){
+    var pad0 = document.createElement("div");
+    pad0.className = "cell empty";
+    grid.appendChild(pad0);
+  }
+  for (var d = 1; d <= days; d++){
+    var cell = document.createElement("div");
+    cell.className = "cell";
+    var list = byDay[d] || [];
+    if (list.length) cell.className += " has";
+    if (sameDay(today, y, mo, d)) cell.className += " today";
+    var num = document.createElement("div");
+    num.className = "d";
+    num.textContent = d;
+    cell.appendChild(num);
+    if (list.length){
+      var dots = document.createElement("div");
+      dots.className = "dots";
+      for (var q = 0; q < list.length; q++){
+        var dot = document.createElement("span");
+        dot.className = "dot " + shiftColor(list[q].summary);
+        dot.title = list[q].summary;
+        dots.appendChild(dot);
+      }
+      cell.appendChild(dots);
+      cell.setAttribute("data-key", list[0].key);
+      cell.addEventListener("click", function(){
+        var el = document.getElementById("d-" + this.getAttribute("data-key"));
+        if (el) el.scrollIntoView({behavior:"smooth", block:"start"});
+      });
+    }
+    grid.appendChild(cell);
+  }
+  renderList();
+}
+function renderList(){
+  var box = document.getElementById("events");
+  box.innerHTML = "";
+  if (!EVENTS.length){
+    box.innerHTML = '<div class="state">暂无未结束的班次</div>';
+    return;
+  }
+  var groups = {};
+  for (var i = 0; i < EVENTS.length; i++){
+    (groups[EVENTS[i].key] = groups[EVENTS[i].key] || []).push(EVENTS[i]);
+  }
+  var keys = Object.keys(groups).sort();
+  for (var k = 0; k < keys.length; k++){
+    var key = keys[k], list = groups[key];
+    var dt = new Date(list[0].y, list[0].mo - 1, list[0].d);
+    var head = document.createElement("div");
+    head.className = "gdate";
+    head.id = "d-" + key;
+    head.textContent = list[0].mo + "月" + list[0].d + "日 " + WEEK[dt.getDay()];
+    box.appendChild(head);
+    for (var n = 0; n < list.length; n++){
+      var e = list[n];
+      var row = document.createElement("div");
+      row.className = "ev";
+      var bar = document.createElement("div");
+      bar.className = "bar " + shiftColor(e.summary);
+      var main = document.createElement("div");
+      main.className = "main";
+      var name = document.createElement("div");
+      name.className = "name";
+      name.textContent = e.summary;
+      var time = document.createElement("div");
+      time.className = "time";
+      time.textContent = pad(e.h) + ":" + pad(e.mi) + (e.eh !== null ? "–" + pad(e.eh) + ":" + pad(e.emi) : "");
+      main.appendChild(name);
+      main.appendChild(time);
+      if (e.location){
+        var addr = document.createElement("div");
+        addr.className = "addr";
+        addr.textContent = e.location;
+        main.appendChild(addr);
+      }
+      row.appendChild(bar);
+      row.appendChild(main);
+      if (e.url){
+        var a = document.createElement("a");
+        a.className = "nav";
+        a.href = e.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = "导航";
+        row.appendChild(a);
+      }
+      box.appendChild(row);
+    }
+  }
+}
+function setSubscribe(){
+  var el = document.getElementById("subscribe");
+  try {
+    var u = new URL("schedule.ics", location.href);
+    if (u.protocol === "http:" || u.protocol === "https:"){
+      el.href = "webcal://" + u.host + u.pathname;
+    }
+  } catch (err) {}
+}
+function boot(){
+  setSubscribe();
+  document.getElementById("prev").addEventListener("click", function(){
+    view = new Date(view.getFullYear(), view.getMonth() - 1, 1); render();
+  });
+  document.getElementById("next").addEventListener("click", function(){
+    view = new Date(view.getFullYear(), view.getMonth() + 1, 1); render();
+  });
+  fetch("schedule.ics?t=" + Date.now(), {cache:"no-store"})
+    .then(function(r){ return r.text(); })
+    .then(function(text){
+      EVENTS = parseICS(text);
+      var now = new Date();
+      if (EVENTS.length){
+        view = new Date(EVENTS[0].y, EVENTS[0].mo - 1, 1);
+        document.getElementById("sub").textContent =
+          "共 " + EVENTS.length + " 个未结束的班次 · 点有颜色的日期可跳转";
+      } else {
+        view = new Date(now.getFullYear(), now.getMonth(), 1);
+        document.getElementById("sub").textContent = "暂无未结束的班次";
+      }
+      render();
+    })
+    .catch(function(){
+      document.getElementById("sub").textContent = "读取 schedule.ics 失败";
+      document.getElementById("events").innerHTML = '<div class="state">无法读取日历文件</div>';
+    });
+}
+boot();
+</script>
 </body>
 </html>
