@@ -503,7 +503,15 @@ def _dav(method: str, url: str, body: str | None, user: str, pwd: str,
         die(f"连不上 CalDAV：{e.reason}")
 
 
-def caldav_calendar_url(user: str, pwd: str, name: str, create: bool = True) -> str:
+SHIFT_CALENDARS = {
+    "早班": ("排班·早班", "#34C759FF"),
+    "晚班": ("排班·晚班", "#FF9500FF"),
+    "白班": ("排班·白班", "#FF2D55FF"),
+}
+LEGACY_CALENDAR = "排班表"
+
+
+def _caldav_discover(user: str, pwd: str) -> str:
     base = "https://caldav.icloud.com"
     s, b = _dav("PROPFIND", base + "/", _PRINCIPAL_XML, user, pwd)
     if s not in (200, 207):
@@ -515,18 +523,49 @@ def caldav_calendar_url(user: str, pwd: str, name: str, create: bool = True) -> 
     home = ET.fromstring(b).find(".//C:calendar-home-set/D:href", NS)
     if home is None:
         die("找不到日历主目录（calendar-home-set）")
-    home_url = urllib.parse.urljoin(base + "/", home.text)
+    return urllib.parse.urljoin(base + "/", home.text)
+
+
+def _caldav_calendars(home_url: str, user: str, pwd: str) -> dict:
     s, b = _dav("PROPFIND", home_url, _LIST_XML, user, pwd, depth="1")
     if s not in (200, 207):
         die(f"读取日历列表失败：HTTP {s}")
+    out = {}
     for resp in ET.fromstring(b).findall("D:response", NS):
         disp = resp.find(".//D:displayname", NS)
         h = resp.find("D:href", NS)
-        if disp is not None and h is not None and (disp.text or "").strip() == name:
-            return urllib.parse.urljoin(home_url, h.text)
+        if disp is not None and h is not None and (disp.text or "").strip():
+            out[disp.text.strip()] = urllib.parse.urljoin(home_url, h.text)
+    return out
+
+
+def caldav_set_color(cal_url: str, user: str, pwd: str, color: str) -> None:
+    body = ('<?xml version="1.0" encoding="utf-8"?>'
+            '<D:propertyupdate xmlns:D="DAV:" xmlns:I="http://apple.com/ns/ical/">'
+            f'<D:set><D:prop><I:calendar-color>{color}</I:calendar-color></D:prop></D:set>'
+            '</D:propertyupdate>')
+    s, msg = _dav("PROPPATCH", cal_url, body, user, pwd)
+    if s not in (200, 207):
+        print(f"  警告：设置日历颜色失败 HTTP {s} {msg[:80]}", file=sys.stderr)
+
+
+def caldav_find_calendar(user: str, pwd: str, name: str, home: str | None = None) -> str | None:
+    home = home or _caldav_discover(user, pwd)
+    return _caldav_calendars(home, user, pwd).get(name)
+
+
+def caldav_calendar_url(user: str, pwd: str, name: str, create: bool = True,
+                        color: str | None = None, home: str | None = None) -> str:
+    home = home or _caldav_discover(user, pwd)
+    cals = _caldav_calendars(home, user, pwd)
+    if name in cals:
+        url = cals[name]
+        if color:
+            caldav_set_color(url, user, pwd, color)
+        return url
     if not create:
         die(f"iCloud 里没有名为「{name}」的日历")
-    new_url = urllib.parse.urljoin(home_url, str(uuid.uuid4()).upper() + "/")
+    new_url = urllib.parse.urljoin(home, str(uuid.uuid4()).upper() + "/")
     body = ('<?xml version="1.0" encoding="utf-8"?><C:mkcalendar xmlns:D="DAV:" '
             'xmlns:C="urn:ietf:params:xml:ns:caldav"><D:set><D:prop>'
             f'<D:displayname>{_esc(name)}</D:displayname>'
@@ -535,6 +574,8 @@ def caldav_calendar_url(user: str, pwd: str, name: str, create: bool = True) -> 
     s, _ = _dav("MKCALENDAR", new_url, body, user, pwd)
     if s not in (200, 201):
         die(f"创建日历「{name}」失败：HTTP {s}")
+    if color:
+        caldav_set_color(new_url, user, pwd, color)
     return new_url
 
 
@@ -554,30 +595,56 @@ def caldav_events(cal_url: str, user: str, pwd: str) -> dict:
     return out
 
 
-def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None, alarm=None) -> tuple[int, int, str]:
-    user, pwd, cal_name = caldav_config()
-    cal_name = name or cal_name
-    cal = caldav_calendar_url(user, pwd, cal_name)
-    events, _ = collect_events(schedule, keep_all)
-    if not events:
-        die("没有要同步的班次")
-    stamp = _stamp(schedule)
-    existing = caldav_events(cal, user, pwd)
+def _put_events(cal_url: str, events: list, stamp: str, alarm,
+                user: str, pwd: str) -> tuple[int, int]:
+    existing = caldav_events(cal_url, user, pwd)
     puts = dels = 0
+    desired = set()
     for e in events:
+        desired.add(e["uid"])
         href = existing.get(e["uid"]) or urllib.parse.urljoin(
-            cal, urllib.parse.quote(e["uid"], safe="@") + ".ics")
+            cal_url, urllib.parse.quote(e["uid"], safe="@") + ".ics")
         s, msg = _dav("PUT", href, event_ics(e, stamp, alarm), user, pwd,
                       ctype="text/calendar; charset=utf-8")
         if s not in (200, 201, 204):
             die(f"写入 {e['day']} 失败：HTTP {s} {msg[:120]}")
         puts += 1
     for uid, href in existing.items():
-        if uid not in {e["uid"] for e in events} and uid.endswith("@paiban2ics"):
+        if uid not in desired and uid.endswith("@paiban2ics"):
             s, _ = _dav("DELETE", href, None, user, pwd)
             if s in (200, 204, 404):
                 dels += 1
-    return puts, dels, cal_name
+    return puts, dels
+
+
+def sync_caldav(schedule: dict, keep_all: bool = False, name: str | None = None,
+                alarm=None, split: bool = True) -> tuple[int, int, str]:
+    user, pwd, cal_name = caldav_config()
+    events, _ = collect_events(schedule, keep_all)
+    if not events:
+        die("没有要同步的班次")
+    stamp = _stamp(schedule)
+    if not split:
+        cal = caldav_calendar_url(user, pwd, name or cal_name)
+        puts, dels = _put_events(cal, events, stamp, alarm, user, pwd)
+        return puts, dels, name or cal_name
+    home = _caldav_discover(user, pwd)
+    puts = dels = 0
+    # iCloud 要求同一账号内 UID 唯一：先把旧「排班表」里的事件清掉，再写到新日历
+    legacy = caldav_find_calendar(user, pwd, LEGACY_CALENDAR, home=home)
+    if legacy:
+        for uid, href in caldav_events(legacy, user, pwd).items():
+            if uid.endswith("@paiban2ics"):
+                s, _ = _dav("DELETE", href, None, user, pwd)
+                if s in (200, 204, 404):
+                    dels += 1
+    for shift, (cname, color) in SHIFT_CALENDARS.items():
+        cal = caldav_calendar_url(user, pwd, cname, color=color, home=home)
+        group = [e for e in events if e["shift"] == shift]
+        p, d = _put_events(cal, group, stamp, alarm, user, pwd)
+        puts += p
+        dels += d
+    return puts, dels, "、".join(c for c, _ in SHIFT_CALENDARS.values())
 
 
 def cmd_build(args) -> None:
@@ -595,9 +662,10 @@ def cmd_sync(args) -> None:
     if not src.exists():
         die(f"找不到 {src}")
     schedule = json.loads(src.read_text(encoding="utf-8"))
-    puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None, parse_alarm(args.alarm))
+    puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None,
+                                   parse_alarm(args.alarm), split=not args.single)
     note = f"，删除 {dels} 个过期" if dels else ""
-    print(f"已同步 {puts} 个班次到 iCloud 日历「{name}」{note}", file=sys.stderr)
+    print(f"已同步 {puts} 个班次到 iCloud「{name}」{note}", file=sys.stderr)
 
 
 def _git_publish() -> None:
@@ -637,7 +705,8 @@ def cmd_publish(args) -> None:
     note = f"（跳过 {skipped} 个已结束）" if skipped else ""
     print(f"日历：{kept} 个班次{note}", file=sys.stderr)
     if not args.no_caldav:
-        puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None, parse_alarm(args.alarm))
+        puts, dels, name = sync_caldav(schedule, args.all, args.calendar or None,
+                                       parse_alarm(args.alarm), split=not getattr(args, "single", False))
         print(f"iCloud「{name}」：写入 {puts}，删除 {dels}", file=sys.stderr)
     if not args.no_git:
         _git_publish()
@@ -695,6 +764,7 @@ def main(argv=None) -> None:
     p.add_argument("--calendar", default="")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true")
+    p.add_argument("--single", action="store_true", help="写到单个日历（旧模式，不拆分）")
     p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("status", help="查看未结束的班次")
@@ -704,6 +774,8 @@ def main(argv=None) -> None:
     p.add_argument("schedule", nargs="?", default="schedule.json")
     p.add_argument("--calendar", default="", help="日历名称，默认读 ICLOUD_CAL")
     p.add_argument("--all", action="store_true", help="包含已结束的班次")
+    p.add_argument("--single", action="store_true", help="写到单个日历（旧模式，不拆分）")
+    p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("update", help="识别 images/ 下所有截图并重新生成")
