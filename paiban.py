@@ -52,7 +52,7 @@ PROMPT = """你是排班表识别助手。图片是一张 Excel 排班表截图�
 - 班二 = 晚班（黄色）
 - 班三 = 白班（粉色）
 - 红色「休息」= 休息
-门店只会是：和风、悦兴、华锦、世纪、泽润。
+门店名照抄图片里的文字；休息时 store 留空字符串。
 
 只输出一个 JSON 对象，不要解释、不要 markdown 代码块：
 {"days":[{"date":"MM-DD","weekday":"周一","shift":"早班|晚班|白班|休息","store":"门店名，休息时为空字符串"}]}
@@ -356,7 +356,7 @@ def collect_events(schedule: dict, keep_all: bool = False) -> tuple[list, int]:
             "shift": shift,
             "cfg": cfg,
             "store": store,
-            "full": place.get("full") or (store + "社康" if store else ""),
+            "full": place.get("full") or store,
             "addr": place.get("address", ""),
             "uid": hashlib.sha1(f"{d['date']}|{shift}|{store}".encode()).hexdigest()[:20] + "@paiban2ics",
         })
