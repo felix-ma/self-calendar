@@ -1,151 +1,110 @@
-# 排班截图 → 手机日历
+# 排班截图 → 日历
 
-把排班表截图交给 DeepSeek 多模态模型识别，生成可以直接导入手机日历的 `.ics`。
-识别在本机跑，仓库里不放截图、不含姓名；生成只用 Python 标准库。
-
-- 识别：`images/` 里的截图（仅本地，不入库）→ `schedule.json`
-- 生成：`schedule.json` → `docs/schedule.ics`
-- 只保留早班 / 晚班 / 白班，休息日不进日历
-- 只写还没结束的班次，历史排班自动跳过
-
-## 结构
+排班表截图交给 DeepSeek 多模态模型识别，生成 `.ics`，同步到 iCloud 日历，
+再由 GitHub Pages 提供预览和订阅。仓库里不放截图、不含姓名，生成只用 Python 标准库。
 
 ```
-paiban.py              识别 + 生成
-places.json            各社康的全称 + 地址（用于导航）
-schedule.json          排班数据（日期 / 班次 / 门店，不含姓名）
-docs/schedule.ics      生成好的日历文件
-docs/index.html        手机导入说明页
-images/                截图目录，仅本地使用（已 gitignore）
+images/*.png ──recognize──> schedule.json ──build──> docs/schedule.ics ──> Pages
+                                      └────────────> iCloud（三个彩色日历）
 ```
 
-## 本地用
+## 文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `paiban.py` | 识别、生成、同步、发布，一个脚本 |
+| `schedule.json` | 排班数据：日期、班次、门店 |
+| `places.json` | 五家社康的全称和地址，写进日历地点和导航链接 |
+| `commute.json` | 起点、门店坐标、车程、通勤方式 |
+| `docs/schedule.ics` | 生成好的日历文件，Pages 直接提供 |
+| `docs/index.html` | 日历预览页，打开时实时读取 `schedule.ics` |
+| `images/` | 截图目录，已 gitignore，只留在本机 |
+
+## 日常用法
 
 ```bash
-export DEEPSEEK_API_KEY=sk-...       # DeepSeek API Key
+python3 paiban.py publish     # 识别 → 生成 → 同步 iCloud → 推送 GitHub
+python3 paiban.py status      # 看未结束的班次和仓库状态
+```
 
-# 1. 识别（截图放 images/）
+`publish` 没设 `DEEPSEEK_API_KEY` 时会跳过识别，直接用现有的 `schedule.json`。
+也可以分步执行：
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
 python3 paiban.py recognize images/*.png -o schedule.json
-
-# 2. 生成
 python3 paiban.py build
-
-# 或者一步到位
-python3 paiban.py update
-```
-
-`update` 会读取 `images/` 下所有图片：有 Key 就重新识别，没有 Key 就沿用
-`schedule.json` 直接生成。生成完 `git push` 即可。
-
-## 一条命令
-
-```bash
-python3 paiban.py publish
-```
-
-依次完成：识别 `images/` → 生成 `docs/schedule.ics` → 同步 iCloud → 提交推送 GitHub。
-可加 `--no-caldav` / `--no-git` / `--all`。
-
-```bash
-python3 paiban.py status     # 看未结束的班次和仓库状态
-```
-
-## 只保留未来的班次
-
-生成时按当前时间过滤：已经结束的班次不写进 `.ics`，所以文件一直很小。
-今天还没下班的班次会保留，下班后自动消失。
-
-想导出完整历史（含已结束的）：
-
-```bash
-python3 paiban.py build --all
-```
-
-## 导入还是订阅？
-
-- **导入**（下载 .ics 再点开）：一次性复制。之后更新了，手机不会变；
-  重新导入也不会删掉旧事件，只会多出一份。
-- **订阅**（webcal:// 或「从网址添加」）：定期重新拉取。源里删掉的事件会自动从
-  手机日历消失，新事件自动出现。想在更新后自动同步，必须用这种方式。
-
-订阅地址就是同一个 `schedule.ics`，把 `https://` 换成 `webcal://` 即可。
-
-- **iPhone**：Safari 打开 `webcal://…/schedule.ics` → 订阅 → 设置 → 日历 →
-  账户 → 抓取新数据，可调刷新频率
-- **Android / Google 日历**：网页版 calendar.google.com → 其他日历 → 从网址添加；
-  手机 App 会自动同步这个订阅日历（只读）
-- 订阅的刷新有延迟：Google 几小时，iOS 按上面设置
-- 订阅链接必须公开可访问
-
-## 同步到 iCloud（CalDAV）
-
-除了生成 `.ics`，也可以直接写进 iCloud 日历。凭据只放本机，不进仓库：
-
-```bash
-mkdir -p ~/.config/paiban
-cat > ~/.config/paiban/caldav.env <<'EOF'
-ICLOUD_USER=你的 Apple ID
-ICLOUD_PASS=App 专用密码
-ICLOUD_CAL=排班表
-EOF
-chmod 600 ~/.config/paiban/caldav.env
-
 python3 paiban.py sync-caldav
 ```
 
-iOS 系统日历只能按「日历」上色，不支持单个事件颜色，所以默认拆成三个日历：
+## 生成规则
 
-| 日历 | 颜色 | 班次 |
-| --- | --- | --- |
-| 排班·早班 | 绿 `#34C759` | 08:00–15:00 |
-| 排班·晚班 | 橙 `#FF9500` | 15:00–22:00 |
-| 排班·白班 | 粉 `#FF2D55` | 08:00–17:00 |
+- 时段固定在脚本顶部 `SHIFTS`：早班 08:00–15:00、晚班 15:00–22:00、
+  白班 08:00–17:00（午休写在事件备注里）
+- 休息日不进日历
+- 只写还没结束的班次，当天下班后自动从 `.ics` 消失；`--all` 导出全部历史
+- 每张截图必须正好 7 天；第一列按周一推断年份，跨年自动进位
+- 同一日期出现在多张图里时，后识别的覆盖先识别的
 
-首次同步会自动建日历并设好颜色。旧的单个「排班表」已清空并删除（2026-11-06）；
-用 `--single` 时会按 `ICLOUD_CAL` 重新建一个。三个日历要分别共享，对方才会同时
-看到颜色和每条事件自己的提醒。
+## 同步到 iCloud
 
-同步按 UID 增删改：新班次写入、改班次覆盖、过期的删除；
-只动 UID 以 `@paiban2ics` 结尾的事件，不会碰日历里别的事件。
-默认只同步未结束的班次，加 `--all` 可连历史一起写。
-注意 iCloud 的 UID 在账号内唯一，所以脚本会先清旧日历、再写新日历。
+iOS 系统日历只能按「日历」上色，不支持单个事件颜色，所以按班次拆成三个：
 
-## 地址与导航
+| 日历 | 颜色 | 班次 | 提醒示例 |
+| --- | --- | --- | --- |
+| 排班·早班 | 绿 `#34C759` | 08:00–15:00 | 悦兴 07:45、和风 07:30 |
+| 排班·晚班 | 橙 `#FF9500` | 15:00–22:00 | 世纪 14:45 |
+| 排班·白班 | 粉 `#FF2D55` | 08:00–17:00 | 泽润 07:35 |
 
-`places.json` 里是各社康的全称和地址，生成时会写进日历的 `LOCATION`，
-并附一条高德搜索链接（`URL`）。手机上点开事件 → 点地点，就能直接导航。
+- 第一次同步自动建日历并设色，之后只增删改事件
+- UID 由「日期 + 班次 + 门店」哈希得到，稳定不变，改班次是原地覆盖
+- 只动 `@paiban2ics` 结尾的事件，不碰日历里的其他事件
+- iCloud 同一账号内 UID 唯一，同一个事件不要同时写进两个日历
+- 三个日历要分别共享；对方通过 iCloud 共享接受后，颜色和每条事件的提醒都会带过去
 
-地址来自公开信息，如与实际不符，改 `places.json` 后重新 `build` 即可。
+凭据只放本机：
 
-## 提醒时间（按通勤算）
-
-`commute.json` 存起点、各家社康坐标和车程。**5 km 内骑电动车，更远打车**：
-
-- 电动车：`km / speed_kmh × 60 + extra_min`（默认 16 km/h，+5 分钟停车）
-- 打车：`OSRM 车程 × traffic_factor + extra_min`（默认 1.8 折算高峰，+8 分钟等车）
-
-结果取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，作为该事件 `VALARM` 的提前量。
-远的班次提醒早、近的提醒晚，事件备注里也会写「通勤：打车 13.2 km，预留 30 分钟」。
-提醒是写在每条事件里的，共享日历后对方也会按同样的提前量收到通知
-（前提是对方通过 iCloud 共享接受，而不是订阅 `.ics`；订阅日历在 iOS 上不采用事件里的提醒）。
-
-- 起点：观澜·中航格澜郡（22.69389, 114.04109）
-- 改 `modes` 里的速度/系数，或某家的 `km` / `drive_min`，重新 `publish` 即生效
-- 某家想固定方式：在该门店加 `"mode": "ebike"` 或 `"taxi"`（泽润就是手动的）
-- `--alarm off` 关闭，`--alarm 30` 统一提前 30 分钟
-
-## 改班次时段
-
-时段写在 `paiban.py` 顶部的 `SHIFTS` 里：
-
-```python
-"早班": {"start": "08:00", "end": "15:00"},
-"晚班": {"start": "15:00", "end": "22:00"},
-"白班": {"start": "08:00", "end": "17:00", "note": "8:00-12:00、14:00-17:00"},
+```bash
+mkdir -p ~/.config/paiban
+printf 'ICLOUD_USER=你的 Apple ID\nICLOUD_PASS=App 专用密码\n' > ~/.config/paiban/caldav.env
+chmod 600 ~/.config/paiban/caldav.env
 ```
 
-白班在日历里显示为一整段 08:00–17:00，午休写在事件备注里。
+## 订阅还是导入
+
+- **订阅**（`webcal://` 或「从网址添加」）：定期重新拉取，源里删掉的事件会自动消失
+- **导入**（下载 `.ics` 再打开）：一次性复制，之后更新不会同步，重导入只会多一份
+
+订阅地址就是 `https://felix-ma.github.io/self-calendar/schedule.ics`，
+把 `https://` 换成 `webcal://` 即可；页面上的「订阅」按钮会自动转。
+
+- Android / Google 日历：网页版「其他日历 → 从网址添加」，填上面的地址
+- iPhone：订阅的日历只读，系统**不采用事件里的提醒**，也只有一个颜色；
+  要在 iPhone 上分色和按通勤提醒，用 iCloud 共享的三个日历，不要用订阅
+
+## 提醒时间
+
+提醒量按通勤时间算，**5 km 内骑电动车，更远打车**：
+
+- 电动车：`km / speed_kmh × 60 + extra_min`（16 km/h，+5 分钟停车）
+- 打车：`OSRM 车程 × traffic_factor + extra_min`（1.8 折算高峰，+8 分钟等车）
+
+结果取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，写进该事件的 `VALARM`。
+远的班次提醒早、近的提醒晚；事件备注里也会写「通勤：打车 13.2 km，预留 30 分钟」。
+
+- 起点：观澜·中航格澜郡（22.69389, 114.04109）
+- 改 `commute.json` 的速度、系数或某家的 `km` / `drive_min`，重新 `publish` 生效
+- 某家想固定方式：加 `"mode": "ebike"` 或 `"taxi"`（泽润就是手动设为电动车的）
+- `--alarm off` 关闭提醒，`--alarm 30` 统一提前 30 分钟
+
+## 设计取舍
+
+- **纯标准库**：手机环境免装依赖，ICS 折行、VTIMEZONE、CalDAV 都手写
+- **`.ics` 提交进仓库**：Pages 只提供静态文件；页面每次打开都带时间戳重新拉取，不受缓存影响
+- **只生成未来班次**：文件小，手机日历也不会被历史占满
+- **按日历分色**：iOS 不支持事件级颜色，写 `COLOR` 也不认，只能拆日历
+- **提醒写进事件**：共享日历会把 `VALARM` 一起带过去；订阅日历则不会
 
 ## 隐私
 
-仓库里只有代码、门店地址和排班数据，不含姓名；排班截图只留在本地。
+仓库里只有代码、门店地址和排班数据，不含姓名；截图只留在本地 `images/`。
