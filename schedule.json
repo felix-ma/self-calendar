@@ -1,6 +1,6 @@
 {
   "timezone": "Asia/Shanghai",
-  "generated_at": "2026-11-05T00:53:28+00:00",
+  "generated_at": "2026-11-06T02:44:31+00:00",
   "shifts": {
     "早班": {
       "start": "08:00",
@@ -142,6 +142,48 @@
       "weekday": "周日",
       "shift": "早班",
       "store": "和风"
+    },
+    {
+      "date": "2026-11-09",
+      "weekday": "周一",
+      "shift": "休息",
+      "store": ""
+    },
+    {
+      "date": "2026-11-10",
+      "weekday": "周二",
+      "shift": "早班",
+      "store": "和风"
+    },
+    {
+      "date": "2026-11-11",
+      "weekday": "周三",
+      "shift": "晚班",
+      "store": "世纪"
+    },
+    {
+      "date": "2026-11-12",
+      "weekday": "周四",
+      "shift": "白班",
+      "store": "泽润"
+    },
+    {
+      "date": "2026-11-13",
+      "weekday": "周五",
+      "shift": "早班",
+      "store": "世纪"
+    },
+    {
+      "date": "2026-11-14",
+      "weekday": "周六",
+      "shift": "早班",
+      "store": "悦兴"
+    },
+    {
+      "date": "2026-11-15",
+      "weekday": "周日",
+      "shift": "早班",
+      "store": "悦兴"
     }
   ]
 }
