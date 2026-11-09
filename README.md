@@ -1,7 +1,7 @@
 # 排班截图 → 日历
 
 排班表截图交给 DeepSeek 多模态模型识别，生成 `.ics`，同步到 iCloud 日历，
-再由 GitHub Pages 提供预览和订阅。仓库里不放截图、不含姓名，生成只用 Python 标准库。
+再由 GitHub Pages 提供预览和订阅。仓库里不放截图、不含姓名，主程序生成只用 Python 标准库。
 
 ```
 images/*.png ──recognize──> schedule.json ──build──> docs/schedule.ics ──> Pages
@@ -19,6 +19,41 @@ images/*.png ──recognize──> schedule.json ──build──> docs/schedu
 | `docs/schedule.ics` | 生成好的日历文件，Pages 直接提供 |
 | `docs/index.html` | 日历预览页，打开时实时读取 `schedule.ics` |
 | `images/` | 截图目录，已 gitignore，只留在本机 |
+
+## 环境与依赖
+
+主程序 `paiban.py` 和 `shortcut/build_shortcut.py` **只用 Python 标准库**（3.10+），
+系统 `python3` 直接跑即可，主流程不需要装任何第三方包。
+
+唯一的第三方依赖是 `PyYAML`，仅供「从本机凭据文件读取 `DEEPSEEK_API_KEY`」这条辅助命令
+使用（见 AGENTS.md「凭据」一节）。不导出 Key、让 `publish` / `update` 沿用现有
+`schedule.json` 时，连它也不需要。
+
+运行时 Linux 环境常被重置、系统安装的包会被清空。为此把依赖放进**项目内的虚拟环境**，
+声明化、可一键重建，且不污染系统 Python：
+
+| 路径 | 作用 |
+| --- | --- |
+| `requirements.txt` | 依赖声明 `PyYAML>=6.0`（随仓库提交） |
+| `.venv/` | 项目内虚拟环境，已 gitignore，**不入库** |
+
+环境重置后重建（项目根目录）：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+用 venv 跑（推荐，取 Key 辅助命令也依赖它）：
+
+```bash
+.venv/bin/python paiban.py status
+# 或先激活，之后照常写 python3 / python
+source .venv/bin/activate
+```
+
+> 主程序本身不依赖 `.venv`：删掉它，系统 `python3 paiban.py` 仍能生成、同步、发布；
+> 只有取 Key 辅助命令会因缺 PyYAML 失败（报 `No module named 'yaml'`），按上面重建即可。
 
 ## 日常用法
 
@@ -99,7 +134,8 @@ chmod 600 ~/.config/paiban/caldav.env
 
 ## 设计取舍
 
-- **纯标准库**：手机环境免装依赖，ICS 折行、VTIMEZONE、CalDAV 都手写
+- **纯标准库**：主程序免装依赖，ICS 折行、VTIMEZONE、CalDAV 都手写；
+  唯一第三方包 PyYAML 只给取 Key 辅助命令用，已隔离进 `.venv`（见「环境与依赖」）
 - **`.ics` 提交进仓库**：Pages 只提供静态文件；页面每次打开都带时间戳重新拉取，不受缓存影响
 - **只生成未来班次**：文件小，手机日历也不会被历史占满
 - **按日历分色**：iOS 不支持事件级颜色，写 `COLOR` 也不认，只能拆日历

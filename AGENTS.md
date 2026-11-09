@@ -24,10 +24,10 @@ python3 paiban.py recognize images/a.jpg -o /tmp/a.json   # 只识别指定图
 - DeepSeek：`~/.dsh/.credentials.yaml` 的 `refs.DEEPSEEK_API_KEY`
 - iCloud：`~/.config/paiban/caldav.env`（`ICLOUD_USER` / `ICLOUD_PASS` 应用专用密码），权限 600
 
-取 Key 时不要回显：
+取 Key 时不要回显。该辅助命令用到 `PyYAML`，须用项目内 venv 的 python（见「依赖」）：
 
 ```bash
-export DEEPSEEK_API_KEY="$(python3 -c "import yaml;print(yaml.safe_load(open('/root/.dsh/.credentials.yaml'))['refs']['DEEPSEEK_API_KEY'])")"
+export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe_load(open('/root/.dsh/.credentials.yaml'))['refs']['DEEPSEEK_API_KEY'])")"
 ```
 
 ## 收到截图后的流程
@@ -68,6 +68,10 @@ export DEEPSEEK_API_KEY="$(python3 -c "import yaml;print(yaml.safe_load(open('/r
 - 页面：<https://felix-ma.github.io/self-calendar/>（月历 + 订阅按钮）
 - iCloud 三个日历：`排班·早班`（绿）/ `排班·晚班`（橙）/ `排班·白班`（粉）
 - 共享给别人时三个日历要**分别共享**；共享后 `VALARM` 会一起带过去，提醒不会退化
+- `docs/alarms.json`：全部未结束班次的闹钟清单（date/time/label/notify/commute），
+  `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断
+- iOS 快捷指令（`shortcut/`）：读 iCloud 日历的「闹钟提前：N 分钟」备注行，
+  删掉 label 含「排班」的旧闹钟后按备注提前量重建；已签名文件随仓库提交
 
 ## 提醒与通勤
 
@@ -93,4 +97,26 @@ export DEEPSEEK_API_KEY="$(python3 -c "import yaml;print(yaml.safe_load(open('/r
 
 ## 依赖
 
-只用 Python 标准库；识别走 HTTP 接口。不需要 OCR、不需要 GitHub Actions。
+- 主程序 `paiban.py` 与 `shortcut/build_shortcut.py` **只用 Python 标准库**（3.10+），
+  系统 `python3` 直接跑即可；识别走 HTTP 接口，不需要 OCR、不需要 GitHub Actions。
+- 唯一第三方包 `PyYAML`，只给「凭据」一节取 `DEEPSEEK_API_KEY` 的辅助命令用。
+- 运行时 Linux 环境常被重置、系统装过的包会被清空，因此依赖放进**项目内 venv**，
+  不污染系统 Python、可一键重建：
+
+  | 路径 | 作用 |
+  | --- | --- |
+  | `requirements.txt` | 依赖声明 `PyYAML>=6.0`（随仓库提交） |
+  | `.venv/` | 项目内虚拟环境，已 gitignore，**不入库** |
+
+  环境重置后重建（项目根目录）：
+
+  ```bash
+  python3 -m venv .venv
+  .venv/bin/python -m pip install -r requirements.txt
+  ```
+
+  用 venv 跑（推荐，取 Key 辅助命令也依赖它）：`.venv/bin/python paiban.py status`；
+  或 `source .venv/bin/activate` 激活后照常写 `python3`。
+
+- 主程序**不依赖 `.venv`**：删掉它，系统 `python3 paiban.py` 仍能生成、同步、发布；
+  只有取 Key 辅助命令会因缺 PyYAML 报 `No module named 'yaml'`，按上面重建即可。
