@@ -23,6 +23,7 @@
   .btn{flex:1;text-align:center;text-decoration:none;border-radius:12px;padding:11px 8px;
     font-weight:600;font-size:15px;background:var(--accent);color:#fff;border:0;cursor:pointer}
   .btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+  .btn.wide{width:100%;display:block;margin-bottom:16px;box-sizing:border-box}
   .card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:16px}
   .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
   .cal-head button{background:none;border:0;font-size:20px;color:var(--muted);padding:4px 12px;cursor:pointer}
@@ -69,6 +70,8 @@
     <a class="btn ghost" href="schedule.ics" download>下载 .ics</a>
   </div>
 
+  <a class="btn wide" id="alarm" href="paiban-alarm.shortcut">导入闹钟快捷指令</a>
+
   <div class="card">
     <div class="cal-head">
       <button id="prev" aria-label="上个月">‹</button>
@@ -93,6 +96,7 @@
       <li>订阅会定期刷新，下载不会自动更新</li>
       <li>提醒时间按通勤算：5 km 内电动车、更远打车</li>
       <li>iPhone 注意：订阅/导入的 .ics 只有一个颜色，系统也不会采用事件里的提醒；要按班次分色 + 逐事件提醒，请用 iCloud 共享的「排班·早班 / 晚班 / 白班」三个日历</li>
+      <li>点「导入闹钟快捷指令」可直接加入快捷指令 App（需 iOS）。首次运行允许读取「日历」；建议设一个每天 00:05 的时间自动化并关掉「运行前询问」</li>
     </ul>
   </details>
 
@@ -301,8 +305,22 @@ function setSubscribe(){
     }
   } catch (err) {}
 }
+function setAlarm(){
+  // Apple 官方 URL 方案：shortcuts://import-shortcut?url=<.shortcut 地址>&name=<名称>
+  // 非 iOS 上保持普通下载链接，点了会存进「文件」
+  var el = document.getElementById("alarm");
+  var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (!isIOS) { el.textContent = "下载闹钟快捷指令"; return; }
+  try {
+    var u = new URL("paiban-alarm.shortcut", location.href);
+    el.href = "shortcuts://import-shortcut?url=" + encodeURIComponent(u.href) +
+              "&name=" + encodeURIComponent("排班闹钟");
+  } catch (err) {}
+}
 function boot(){
   setSubscribe();
+  setAlarm();
   document.getElementById("prev").addEventListener("click", function(){
     view = new Date(view.getFullYear(), view.getMonth() - 1, 1); render();
   });

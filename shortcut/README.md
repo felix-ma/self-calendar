@@ -1,8 +1,23 @@
 # 排班闹钟 · iOS 快捷指令
 
 ## 文件
-- `排班闹钟.shortcut` —— 已签名，可直接导入 iPhone（AirDrop / 存到「文件」后双击）
-- `build_shortcut.py` —— 生成器，改了逻辑后重新生成
+- `排班闹钟.shortcut` —— 已签名，可直接导入 iPhone
+- `build_shortcut.py` —— 生成器（XML plist），改了逻辑后重新生成
+- `sign.py` —— 签名脚本，把 plist 变成可导入的 `.shortcut`
+
+## 重新生成
+```bash
+python3 shortcut/build_shortcut.py /tmp/a.plist
+python3 shortcut/sign.py /tmp/a.plist shortcut/排班闹钟.shortcut
+cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用这份
+```
+
+## 导入方式
+1. **页面按钮**：打开 <https://felix-ma.github.io/self-calendar/>，
+   点「导入闹钟快捷指令」，Safari 会直接唤起快捷指令 App
+   （用的是 Apple 官方 URL 方案 `shortcuts://import-shortcut`）
+2. **AirDrop**：把 `.shortcut` 传到 iPhone
+3. **文件 App**：下载后点开
 
 ## 提前量从哪来
 跟日历提醒**完全一致**，不用另配：
