@@ -17,80 +17,6 @@ TZNAME:CST
 END:STANDARD
 END:VTIMEZONE
 BEGIN:VEVENT
-UID:21bc80e2408b6920dec1@paiban2ics
-DTSTAMP:20261106T024431Z
-DTSTART;TZID=Asia/Shanghai:20261106T080000
-DTEND;TZID=Asia/Shanghai:20261106T150000
-SUMMARY:早班·悦兴
-LOCATION:悦兴社区健康服务中心，深圳市龙华区福城街道
- 悦兴路南侧华盛观荟名庭半地下162-163、165-173、175-177
-URL:https://uri.amap.com/search?keyword=%E6%82%A6%E5%85%B4%E7%A4%BE%E5%8C
- %BA%E5%81%A5%E5%BA%B7%E6%9C%8D%E5%8A%A1%E4%B8%AD%E5%BF%83%20%E6%B7%B1%E5%
- 9C%B3%E5%B8%82%E9%BE%99%E5%8D%8E%E5%8C%BA%E7%A6%8F%E5%9F%8E%E8%A1%97%E9%8
- 1%93%E6%82%A6%E5%85%B4%E8%B7%AF%E5%8D%97%E4%BE%A7%E5%8D%8E%E7%9B%9B%E8%A7
- %82%E8%8D%9F%E5%90%8D%E5%BA%AD%E5%8D%8A%E5%9C%B0%E4%B8%8B162-163%E3%80%81
- 165-173%E3%80%81175-177&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：悦兴社区健康服
- 务中心\n地址：深圳市龙华区福城街道悦兴路南侧华盛
- 观荟名庭半地下162-163、165-173、175-177\n通勤：骑电动车 3
- .0 km，预留 15 分钟
-STATUS:CONFIRMED
-TRANSP:OPAQUE
-BEGIN:VALARM
-TRIGGER:-PT15M
-ACTION:DISPLAY
-DESCRIPTION:该出发了 · 骑电动车到悦兴
-END:VALARM
-END:VEVENT
-BEGIN:VEVENT
-UID:f2bfc8f058e1f5264531@paiban2ics
-DTSTAMP:20261106T024431Z
-DTSTART;TZID=Asia/Shanghai:20261107T080000
-DTEND;TZID=Asia/Shanghai:20261107T150000
-SUMMARY:早班·华锦
-LOCATION:华锦社区健康服务中心，深圳市龙华区民治街道
- 梅龙路2号星河COCO City L1S-037F
-URL:https://uri.amap.com/search?keyword=%E5%8D%8E%E9%94%A6%E7%A4%BE%E5%8C
- %BA%E5%81%A5%E5%BA%B7%E6%9C%8D%E5%8A%A1%E4%B8%AD%E5%BF%83%20%E6%B7%B1%E5%
- 9C%B3%E5%B8%82%E9%BE%99%E5%8D%8E%E5%8C%BA%E6%B0%91%E6%B2%BB%E8%A1%97%E9%8
- 1%93%E6%A2%85%E9%BE%99%E8%B7%AF2%E5%8F%B7%E6%98%9F%E6%B2%B3COCO%20City%20
- L1S-037F&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：华锦社区健康服
- 务中心\n地址：深圳市龙华区民治街道梅龙路2号星河COCO
-  City L1S-037F\n通勤：打车 13.2 km，预留 30 分钟
-STATUS:CONFIRMED
-TRANSP:OPAQUE
-BEGIN:VALARM
-TRIGGER:-PT30M
-ACTION:DISPLAY
-DESCRIPTION:该出发了 · 打车到华锦
-END:VALARM
-END:VEVENT
-BEGIN:VEVENT
-UID:dc68fd4d7d322bd61d9a@paiban2ics
-DTSTAMP:20261106T024431Z
-DTSTART;TZID=Asia/Shanghai:20261108T080000
-DTEND;TZID=Asia/Shanghai:20261108T150000
-SUMMARY:早班·和风
-LOCATION:和风社区健康服务中心，深圳市龙华区民治街道
- 民乐村商住楼9栋1楼101-105
-URL:https://uri.amap.com/search?keyword=%E5%92%8C%E9%A3%8E%E7%A4%BE%E5%8C
- %BA%E5%81%A5%E5%BA%B7%E6%9C%8D%E5%8A%A1%E4%B8%AD%E5%BF%83%20%E6%B7%B1%E5%
- 9C%B3%E5%B8%82%E9%BE%99%E5%8D%8E%E5%8C%BA%E6%B0%91%E6%B2%BB%E8%A1%97%E9%8
- 1%93%E6%B0%91%E4%B9%90%E6%9D%91%E5%95%86%E4%BD%8F%E6%A5%BC9%E6%A0%8B1%E6%
- A5%BC101-105&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：和风社区健康服
- 务中心\n地址：深圳市龙华区民治街道民乐村商住楼9栋1
- 楼101-105\n通勤：打车 11.8 km，预留 30 分钟
-STATUS:CONFIRMED
-TRANSP:OPAQUE
-BEGIN:VALARM
-TRIGGER:-PT30M
-ACTION:DISPLAY
-DESCRIPTION:该出发了 · 打车到和风
-END:VALARM
-END:VEVENT
-BEGIN:VEVENT
 UID:ef76f8f5c8fc96317ad9@paiban2ics
 DTSTAMP:20261106T024431Z
 DTSTART;TZID=Asia/Shanghai:20261110T080000
@@ -103,9 +29,10 @@ URL:https://uri.amap.com/search?keyword=%E5%92%8C%E9%A3%8E%E7%A4%BE%E5%8C
  9C%B3%E5%B8%82%E9%BE%99%E5%8D%8E%E5%8C%BA%E6%B0%91%E6%B2%BB%E8%A1%97%E9%8
  1%93%E6%B0%91%E4%B9%90%E6%9D%91%E5%95%86%E4%BD%8F%E6%A5%BC9%E6%A0%8B1%E6%
  A5%BC101-105&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：和风社区健康服
- 务中心\n地址：深圳市龙华区民治街道民乐村商住楼9栋1
- 楼101-105\n通勤：打车 11.8 km，预留 30 分钟
+DESCRIPTION:闹钟提前：30 分钟\n班次：早班 08:00-15:00\n门店
+ ：和风社区健康服务中心\n地址：深圳市龙华区民治街
+ 道民乐村商住楼9栋1楼101-105\n通勤：打车 11.8 km，预留 30
+  分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
@@ -128,10 +55,10 @@ URL:https://uri.amap.com/search?keyword=%E4%B8%96%E7%BA%AA%E5%B9%BF%E5%9C
  9%96%E8%A1%97%E9%81%93%E8%A7%82%E5%9F%8E%E7%A4%BE%E5%8C%BA%E9%A9%AC%E5%9D
  %9C%E6%96%B0%E6%9D%91%E5%A4%A7%E5%92%8C%E8%B7%AF202-1%E3%80%81202-3%E5%8F
  %B7&city=440300
-DESCRIPTION:班次：晚班 15:00-22:00\n门店：世纪广场社区健
- 康服务中心\n地址：深圳市龙华区观湖街道观城社区马
- 坜新村大和路202-1、202-3号\n通勤：骑电动车 2.8 km，预留
-  15 分钟
+DESCRIPTION:闹钟提前：15 分钟\n班次：晚班 15:00-22:00\n门店
+ ：世纪广场社区健康服务中心\n地址：深圳市龙华区观
+ 湖街道观城社区马坜新村大和路202-1、202-3号\n通勤：骑
+ 电动车 2.8 km，预留 15 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
@@ -153,10 +80,10 @@ URL:https://uri.amap.com/search?keyword=%E6%B3%BD%E6%B6%A6%E7%A4%BE%E5%8C
  9C%B3%E5%B8%82%E9%BE%99%E5%8D%8E%E5%8C%BA%E9%BE%99%E5%8D%8E%E8%A1%97%E9%8
  1%93%E5%8D%8E%E8%81%94%E7%A4%BE%E5%8C%BA%E9%87%91%E9%BE%99%E5%8D%8E%E5%B9
  %BF%E5%9C%BA%E4%B8%80%E6%9C%9F%E4%B8%80%E5%B1%82&city=440300
-DESCRIPTION:班次：白班 08:00-17:00（8:00-12:00、14:00-17:00，12:0
- 0-14:00 休息）\n门店：泽润社区健康服务中心\n地址：深
- 圳市龙华区龙华街道华联社区金龙华广场一期一层\n通
- 勤：骑电动车 5.4 km，预留 25 分钟
+DESCRIPTION:闹钟提前：25 分钟\n班次：白班 08:00-17:00（8:00-
+ 12:00、14:00-17:00，12:00-14:00 休息）\n门店：泽润社区健康
+ 服务中心\n地址：深圳市龙华区龙华街道华联社区金龙
+ 华广场一期一层\n通勤：骑电动车 5.4 km，预留 25 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
@@ -179,10 +106,10 @@ URL:https://uri.amap.com/search?keyword=%E4%B8%96%E7%BA%AA%E5%B9%BF%E5%9C
  9%96%E8%A1%97%E9%81%93%E8%A7%82%E5%9F%8E%E7%A4%BE%E5%8C%BA%E9%A9%AC%E5%9D
  %9C%E6%96%B0%E6%9D%91%E5%A4%A7%E5%92%8C%E8%B7%AF202-1%E3%80%81202-3%E5%8F
  %B7&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：世纪广场社区健
- 康服务中心\n地址：深圳市龙华区观湖街道观城社区马
- 坜新村大和路202-1、202-3号\n通勤：骑电动车 2.8 km，预留
-  15 分钟
+DESCRIPTION:闹钟提前：15 分钟\n班次：早班 08:00-15:00\n门店
+ ：世纪广场社区健康服务中心\n地址：深圳市龙华区观
+ 湖街道观城社区马坜新村大和路202-1、202-3号\n通勤：骑
+ 电动车 2.8 km，预留 15 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
@@ -205,10 +132,10 @@ URL:https://uri.amap.com/search?keyword=%E6%82%A6%E5%85%B4%E7%A4%BE%E5%8C
  1%93%E6%82%A6%E5%85%B4%E8%B7%AF%E5%8D%97%E4%BE%A7%E5%8D%8E%E7%9B%9B%E8%A7
  %82%E8%8D%9F%E5%90%8D%E5%BA%AD%E5%8D%8A%E5%9C%B0%E4%B8%8B162-163%E3%80%81
  165-173%E3%80%81175-177&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：悦兴社区健康服
- 务中心\n地址：深圳市龙华区福城街道悦兴路南侧华盛
- 观荟名庭半地下162-163、165-173、175-177\n通勤：骑电动车 3
- .0 km，预留 15 分钟
+DESCRIPTION:闹钟提前：15 分钟\n班次：早班 08:00-15:00\n门店
+ ：悦兴社区健康服务中心\n地址：深圳市龙华区福城街
+ 道悦兴路南侧华盛观荟名庭半地下162-163、165-173、175-177\
+ n通勤：骑电动车 3.0 km，预留 15 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM
@@ -231,10 +158,10 @@ URL:https://uri.amap.com/search?keyword=%E6%82%A6%E5%85%B4%E7%A4%BE%E5%8C
  1%93%E6%82%A6%E5%85%B4%E8%B7%AF%E5%8D%97%E4%BE%A7%E5%8D%8E%E7%9B%9B%E8%A7
  %82%E8%8D%9F%E5%90%8D%E5%BA%AD%E5%8D%8A%E5%9C%B0%E4%B8%8B162-163%E3%80%81
  165-173%E3%80%81175-177&city=440300
-DESCRIPTION:班次：早班 08:00-15:00\n门店：悦兴社区健康服
- 务中心\n地址：深圳市龙华区福城街道悦兴路南侧华盛
- 观荟名庭半地下162-163、165-173、175-177\n通勤：骑电动车 3
- .0 km，预留 15 分钟
+DESCRIPTION:闹钟提前：15 分钟\n班次：早班 08:00-15:00\n门店
+ ：悦兴社区健康服务中心\n地址：深圳市龙华区福城街
+ 道悦兴路南侧华盛观荟名庭半地下162-163、165-173、175-177\
+ n通勤：骑电动车 3.0 km，预留 15 分钟
 STATUS:CONFIRMED
 TRANSP:OPAQUE
 BEGIN:VALARM

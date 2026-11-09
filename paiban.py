@@ -391,7 +391,11 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
     store, full, addr = e["store"], e["full"], e["addr"]
     summary = shift + (f"·{store}" if store else "")
     minutes, mode, km = alarm_info(e, fixed_alarm)
-    desc = f"班次：{shift} {cfg['start']}-{cfg['end']}"
+    desc = ""
+    if minutes:
+        # 放在最前面：保证不会被 iCalendar 75 字节折行切断
+        desc = f"闹钟提前：{minutes} 分钟\n"
+    desc += f"班次：{shift} {cfg['start']}-{cfg['end']}"
     if cfg.get("note"):
         desc += f"（{cfg['note']}）"
     if store:
@@ -440,6 +444,51 @@ def build_ics(schedule: dict, path: Path, alarm=None, keep_all: bool = False) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_ics_text(lines), encoding="utf-8", newline="")
     return len(events), skipped
+
+
+ALARM_LABEL = "排班"
+
+
+def build_alarms(schedule: dict, path: Path, alarm=None,
+                 keep_all: bool = False, days: int = 2) -> tuple[int, Path]:
+    """导出喂给 iOS 快捷指令的闹钟清单：未来 days 天内每个班次一条。
+
+    快捷指令流程：拉这份 JSON -> 删掉 label 以「排班」开头的旧闹钟 -> 按 at 新建。
+    只给 2 天窗口，时钟 app 里始终只有 1~2 个闹钟，不会堆一堆。
+    """
+    events, _ = collect_events(schedule, keep_all)
+    now = datetime.now(TZOFF)
+    limit = now + timedelta(days=days)
+    out = []
+    for e in events:
+        minutes, mode, km = alarm_info(e, alarm)
+        if not minutes:
+            continue
+        start_dt = datetime.combine(e["day"], dtime.fromisoformat(e["cfg"]["start"]), tzinfo=TZOFF)
+        at = start_dt - timedelta(minutes=minutes)
+        if at <= now or at > limit:
+            continue
+        out.append({
+            "label": f"{ALARM_LABEL}·{e['shift']}",
+            "at": at.strftime("%Y-%m-%dT%H:%M:00"),
+            "time": at.strftime("%H:%M"),
+            "date": e["day"].isoformat(),
+            "shift": e["shift"],
+            "notify": minutes,
+            "commute": mode,
+        })
+    out.sort(key=lambda x: x["at"])
+    data = {
+        "generated_at": datetime.now(TZOFF).strftime("%Y-%m-%dT%H:%M:%S"),
+        "timezone": TZID,
+        "label_prefix": ALARM_LABEL,
+        "window_days": days,
+        "count": len(out),
+        "alarms": out,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return len(out), path
 
 
 def event_ics(e: dict, stamp: str, alarm=None) -> str:
@@ -623,9 +672,13 @@ def cmd_build(args) -> None:
     if not src.exists():
         die(f"找不到 {src}")
     schedule = json.loads(src.read_text(encoding="utf-8"))
-    kept, skipped = build_ics(schedule, Path(args.out), parse_alarm(args.alarm), args.all)
+    out = Path(args.out)
+    kept, skipped = build_ics(schedule, out, parse_alarm(args.alarm), args.all)
     note = f"，跳过 {skipped} 个已结束" if skipped else ""
     print(f"已生成 {args.out}：{kept} 个未结束的班次{note}", file=sys.stderr)
+    n, ap = build_alarms(schedule, out.with_name("alarms.json"),
+                         parse_alarm(args.alarm), args.all, args.alarm_days)
+    print(f"已生成 {ap.name}：{n} 个待建闹钟", file=sys.stderr)
 
 
 def cmd_sync(args) -> None:
@@ -674,6 +727,9 @@ def cmd_publish(args) -> None:
     kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
     note = f"（跳过 {skipped} 个已结束）" if skipped else ""
     print(f"日历：{kept} 个班次{note}", file=sys.stderr)
+    n, _ = build_alarms(schedule, ROOT / "docs" / "alarms.json",
+                        parse_alarm(args.alarm), args.all, getattr(args, "alarm_days", 2))
+    print(f"闹钟清单：{n} 个", file=sys.stderr)
     if not args.no_caldav:
         puts, dels, name = sync_caldav(schedule, args.all, parse_alarm(args.alarm))
         print(f"iCloud「{name}」：写入 {puts}，删除 {dels}", file=sys.stderr)
@@ -709,6 +765,9 @@ def cmd_update(args) -> None:
     kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
     note = f"，跳过 {skipped} 个已结束" if skipped else ""
     print(f"已生成 docs/schedule.ics：{kept} 个班次{note}", file=sys.stderr)
+    n, _ = build_alarms(schedule, ROOT / "docs" / "alarms.json",
+                        parse_alarm(args.alarm), args.all, getattr(args, "alarm_days", 2))
+    print(f"已生成 docs/alarms.json：{n} 个待建闹钟", file=sys.stderr)
 
 
 def main(argv=None) -> None:
@@ -725,6 +784,7 @@ def main(argv=None) -> None:
     p.add_argument("-o", "--out", default="docs/schedule.ics")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--alarm-days", type=int, default=2, help="alarms.json 覆盖未来几天（默认 2）")
     p.set_defaults(func=cmd_build)
 
     p = sub.add_parser("publish", help="识别 + 生成 + 同步 iCloud + 推送 GitHub")
@@ -732,6 +792,7 @@ def main(argv=None) -> None:
     p.add_argument("--no-caldav", action="store_true", help="不同步 iCloud")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--alarm-days", type=int, default=2, help="alarms.json 覆盖未来几天（默认 2）")
     p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("status", help="查看未结束的班次")
@@ -746,6 +807,7 @@ def main(argv=None) -> None:
     p = sub.add_parser("update", help="识别 images/ 下所有截图并重新生成")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--alarm-days", type=int, default=2, help="alarms.json 覆盖未来几天（默认 2）")
     p.set_defaults(func=cmd_update)
 
     args = ap.parse_args(argv)
