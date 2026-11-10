@@ -493,12 +493,23 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
             "lead": minutes,
         })
     out.sort(key=lambda x: x["at"])
+    # iOS 的闹钟只有「时:分」，没有日期：设 07:45 就是在下一个 07:45 响。
+    # 所以只有当目标时刻距现在不超过 24 小时才建，否则会把明天的闹钟
+    # 提前到今天响。超过 24 小时的留给明天的自动化再建。
+    next_alarm = out[0] if out else None
+    due = None
+    if next_alarm:
+        gap = (datetime.fromisoformat(next_alarm["at"]).replace(tzinfo=TZOFF) - now).total_seconds()
+        if 0 < gap <= 24 * 3600:
+            due = next_alarm
     data = {
         "generated_at": datetime.now(TZOFF).strftime("%Y-%m-%dT%H:%M:%S"),
         "timezone": TZID,
         "label_prefix": ALARM_LABEL,
         "window_days": days,
         "count": len(out),
+        "next": next_alarm,
+        "due": due,
         "alarms": out,
     }
     path.parent.mkdir(parents=True, exist_ok=True)

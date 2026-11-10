@@ -68,11 +68,13 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - 页面：<https://felix-ma.github.io/self-calendar/>（月历 + 订阅按钮）
 - iCloud 三个日历：`排班·早班`（绿）/ `排班·晚班`（橙）/ `排班·白班`（粉）
 - 共享给别人时三个日历要**分别共享**；共享后 `VALARM` 会一起带过去，提醒不会退化
-- `docs/alarms.json`：全部未结束班次的闹钟清单（date/time/label/notify/commute），
-  `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断
-- iOS 快捷指令（`shortcut/`）：读 iCloud 日历备注第一行「预留：N 分钟」，
-  删掉 label 含「排班」的旧闹钟后按同一提前量重建（闹钟与提醒同时刻响）；
-  已签名文件随仓库提交
+- `docs/alarms.json`：全部未结束班次的闹钟清单（`at`/`time`/`start`/`shift`/`label`/`commute`/`lead`），
+  `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断。
+  顶层另有 `next`（最近一条待建）和 `due`（仅当它在 24 小时内才有值，
+  否则 null —— 闹钟只有「时:分」没日期，超 24 小时建会提前响）
+- iOS 快捷指令（`shortcut/`）：GET 线上 `alarms.json` 取 `due`，
+  无值就通知「本次不建」；有值则把 label 含「排班」的旧闹钟**关掉**（不删、不弹窗），
+  再按 `at` 建新闹钟。已签名文件随仓库提交
 - 页面按钮：`docs/paiban-alarm.shortcut` 是给下载按钮用的副本（直接下载，不再用
   `shortcuts://` 前缀）；每次重新签名后要
   `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`

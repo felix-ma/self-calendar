@@ -126,7 +126,8 @@ chmod 600 ~/.config/paiban/caldav.env
 
 结果取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，写进该事件的 `VALARM`。
 远的班次提醒早、近的提醒晚；这个数就是「预留」，写在事件备注第一行
-（`预留：N 分钟`），iOS 快捷指令据此建同一时刻的闹钟。
+（`预留：N 分钟`）。`docs/alarms.json` 里每条闹钟的 `at` 已经按这个预留
+算好响铃时刻（与 `VALARM` 同刻），iOS 快捷指令直接取用。
 
 - 起点、坐标、车程、通勤方式都在 `commute.json`（本机配置）
 - 改速度、系数或某家的 `km` / `drive_min`，重新 `publish` 生效

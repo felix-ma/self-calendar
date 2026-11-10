@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 """生成「排班闹钟」快捷指令（.plist → 交给 playground 签名）。
 
-流程：
-  1. 找今天三个排班日历里标题含「班」的日程
-  2. 找时钟里所有闹钟，只删名字含「排班」的（二次确认，避免误删别的闹钟）
-  3. 按每个日程的开始时间，减去备注里的「预留：N 分钟」，建新闹钟
+流程（不读日历、不读备注，直接请求线上 alarms.json）：
+  1. 拉 https://felix-ma.github.io/self-calendar/alarms.json
+  2. 取 due 字段：paiban.py 已经算好「下一次该建的闹钟」
+     （今天的班次过了/今天没排班就自动落到明天；全都过了就是空）
+  3. due 为空 → 什么都不建，只提示一句
+  4. due 有值 → 把时钟里名字含「排班」的旧闹钟**关掉**（不删除、不弹窗），
+     再按 due 的时间建新闹钟
 
-闹钟与日历提醒用同一个提前量：都是「该出发了」的时刻。
-提前量来自备注第一行的「预留：N 分钟」，由 paiban.py 按通勤算好。
+为什么改用 alarms.json：iOS 各版本对日历备注的读取不一致，正则经常取不到数；
+而 alarms.json 是本仓库生成的静态文件，字段固定、本机可测。
+
+为什么用「关掉旧闹钟」而不是删除：删除需要用户确认弹窗，关掉不需要。
 """
-import plistlib, uuid, sys
+import plistlib, sys, uuid
 from pathlib import Path
+
+ALARMS_URL = "https://felix-ma.github.io/self-calendar/alarms.json"
+
+LEAD_FALLBACK = 60      # 只出现在注释里，解释万一没有 due 时的行为
+LABEL = "排班"           # 闹钟标签识别关键字
+ALARM_PREFIX = "排班·"    # 新建闹钟的标签前缀，保证下次运行能认出自己建的
 
 
 def U() -> str:
@@ -25,13 +36,16 @@ def ref(name, aggs=None):
     return r
 
 
-def out(uid, name):
+def out(uid, name, aggs=None):
     """裸 ActionOutput 引用。"""
-    return {"Type": "ActionOutput", "OutputUUID": uid, "OutputName": name}
+    r = {"Type": "ActionOutput", "OutputUUID": uid, "OutputName": name}
+    if aggs:
+        r["Aggrandizements"] = aggs
+    return r
 
 
 def attach(r):
-    """需要包一层 WFTextTokenAttachment 的场合（各动作的输入槽）。"""
+    """各动作输入槽要包一层 WFTextTokenAttachment。"""
     return {"Value": r, "WFSerializationType": "WFTextTokenAttachment"}
 
 
@@ -54,15 +68,22 @@ def token(parts):
             "WFSerializationType": "WFTextTokenString"}
 
 
-def act(ident, params=None):
+def act(ident, params=None, name=None, uid=None):
+    """name 非空时写 CustomOutputName —— 引用它的 OutputName 必须用同一个字符串，
+    否则 iOS 会显示「未知变量」。"""
+    p = dict(params or {})
+    if uid:
+        p["UUID"] = uid
+    if name:
+        p["CustomOutputName"] = name
     d = {"WFWorkflowActionIdentifier": ident}
-    if params is not None:
-        d["WFWorkflowActionParameters"] = params
+    if p:
+        d["WFWorkflowActionParameters"] = p
     return d
 
 
 def cond_input(r):
-    """条件动作的 WFInput 要额外套一层 Variable（跟其它动作的输入槽规则不同）。"""
+    """条件动作的 WFInput 要额外套一层 Variable（跟别的动作输入槽规则不同）。"""
     return {"Type": "Variable", "Variable": attach(r)}
 
 
@@ -71,11 +92,6 @@ def if_block(group, mode, **kw):
     p.update(kw)
     return act("is.workflow.actions.conditional", p)
 
-
-LEAD = 60              # 兜底提前分钟：备注里没有「预留：N」时用这个
-LABEL = "排班"          # 闹钟标签的识别关键字：Find Alarms、If、新建前缀都用它
-ALARM_PREFIX = "排班·"   # 新建闹钟的标签前缀，保证下次运行能认出自己建的
-PATTERN = "预留：(\\d+)"
 
 CLOCK = {"ActionRequiresAppInstallation": True,
          "BundleIdentifier": "com.apple.mobiletimer",
@@ -87,169 +103,112 @@ ALARM_LABEL_AGG = {"PropertyName": "label",
                        "WFLinkEntityContentPropertyUserInfoPropertyIdentifier": "label"},
                    "Type": "WFPropertyVariableAggrandizement"}
 
-A_CAL, A_ALM = U(), U()
-A_START, A_TITLE, A_NOTES = U(), U(), U()
-A_MATCH, A_GROUP, A_NUM, A_ADJUST, A_DEFAULT = U(), U(), U(), U(), U()
-G_DEL, G_IFDEL, G_LOOP, G_IF = U(), U(), U(), U()
+TIME_AGG = {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}
 
-
-def calendar_filter():
-    """今天、标题含「班」、非全天——AND 关系。"""
-    return {
-        "Value": {
-            "WFActionParameterFilterPrefix": 1,
-            "WFActionParameterFilterTemplates": [
-                # 1002 = 「是今天」，官方格式不带 Values；
-                # 之前写的 {"Unit":16,"Number":1} 是无效参数，会导致条件变红/失效
-                {"Operator": 1002, "Bounded": True, "Removable": False,
-                 "Property": "Start Date", "Values": {}},
-                {"Operator": 99, "Removable": True, "Property": "Title",
-                 "Values": {"String": "班", "Unit": 4}},
-                {"Operator": 4, "Removable": True, "Property": "Is All Day",
-                 "Values": {"Bool": False}},
-            ],
-            "WFContentPredicateBoundedDate": False,
-        },
-        "WFSerializationType": "WFContentPredicateTableTemplate",
-    }
-
+A_DL, A_DICT, A_DUE, A_AT, A_DATE, A_LABEL, A_ALM = U(), U(), U(), U(), U(), U(), U()
+A_COUNT = U()
+G_MAIN, G_ALM, G_IF = U(), U(), U()
 
 actions = [
     act("is.workflow.actions.comment", {"WFCommentActionText":
-        "每天自动跑：找出今天标题含「班」的日程，删掉时钟里名字含「排班」的旧闹钟，"
-        "再按日程备注里的「预留：N 分钟」往前推着建新闹钟。\n\n"
-        "闹钟与日历提醒同一时刻响（都是该出发的时间），提前量由 paiban.py 按通勤算好，"
-        "写在备注第一行；没有这行时退回 " + str(LEAD) + " 分钟。\n"
-        "建议在「自动化」里加一个每天 00:05 的「时间」触发，并关掉「运行前询问」。"
+        "每天自动跑：拉取线上排班闹钟清单（alarms.json），取 paiban.py 算好的 due，"
+        "把时钟里名字含「排班」的旧闹钟关掉，再按 due 的时间建新闹钟。\n\n"
+        "due 已经包含「今天班次过了就看明天、明天没排班就不建」的判断，"
+        "所以这里不做日期判断，只看 due 有没有值。\n"
+        "旧闹钟用「关闭」而不是「删除」：删除会弹窗要你确认，关闭不会。\n"
+        "建议在「自动化」里加每天 00:05 的时间触发，并关掉「运行前询问」。"
     }),
 
-    # 1. 找今天的排班日程
-    act("is.workflow.actions.filter.calendarevents",
-        {"WFContentItemInputParameter": "Library",
-         "WFContentItemLimitEnabled": False,
-         "UUID": A_CAL,
-         "WFContentItemFilter": calendar_filter()}),
+    # 1. 拉线上清单
+    act("is.workflow.actions.downloadurl",
+        {"WFURL": ALARMS_URL, "WFHTTPMethod": "GET"},
+        name="清单", uid=A_DL),
 
-    # 2. 找时钟里名字带「排班」的闹钟
-    #    属性名是小写 "label"（与参考实现一致，枚举里的 identifier 就是 label）；
-    #    后面第 3a 步还会再判一次，双保险：即使这里没过滤住也不会误删别的闹钟
+    # 1a. 明确解析成字典：服务器返回的 content-type 不一定被识别成 JSON，
+    #     少了这步「获取字典值」会拿不到东西
+    act("is.workflow.actions.detect.dictionary",
+        {"WFInput": attach(out(A_DL, "清单"))},
+        name="清单字典", uid=A_DICT),
+
+    # 2. 取 due（下一次该建的闹钟；没有就是空）
+    act("is.workflow.actions.getvalueforkey",
+        {"WFInput": attach(out(A_DICT, "清单字典")),
+         "WFGetDictionaryValueType": "Value",
+         "WFDictionaryKey": "due"},
+        name="下次闹钟", uid=A_DUE),
+
+    # 3. due 有值才继续
+    if_block(G_MAIN, 0,
+             WFInput=cond_input(out(A_DUE, "下次闹钟")),
+             WFCondition=101),
+
+    # 4. due.at → 日期
+    act("is.workflow.actions.getvalueforkey",
+        {"WFInput": attach(out(A_DUE, "下次闹钟")),
+         "WFGetDictionaryValueType": "Value",
+         "WFDictionaryKey": "at"},
+        name="开始时刻", uid=A_AT),
+
+    act("is.workflow.actions.detect.date",
+        {"WFInput": attach(out(A_AT, "开始时刻"))},
+        name="日期", uid=A_DATE),
+
+    # 5. due.label → 闹钟名（形如「排班·早班」）
+    act("is.workflow.actions.getvalueforkey",
+        {"WFInput": attach(out(A_DUE, "下次闹钟")),
+         "WFGetDictionaryValueType": "Value",
+         "WFDictionaryKey": "label"},
+        name="闹钟名", uid=A_LABEL),
+
+    # 6. 取时钟里所有闹钟（不靠过滤条件：真机上 label 过滤不可靠，
+    #    改在循环里逐个判断，既不会漏也不会误伤）
     act("com.apple.mobiletimer-framework.MobileTimerIntents.MTGetAlarmsIntent",
         {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="AlarmEntity"),
          "ShowWhenRun": False,
-         "UUID": A_ALM,
-         "WFContentItemInputParameter": "Library",
-         "WFContentItemFilter": {
-             "Value": {
-                 "WFActionParameterFilterPrefix": 1,
-                 "WFActionParameterFilterTemplates": [{
-                     "Operator": 99, "Property": "label", "Removable": True,
-                     "Values": {"String": LABEL, "Unit": 4},
-                 }],
-                 "WFContentPredicateBoundedDate": False,
-             },
-             "WFSerializationType": "WFContentPredicateTableTemplate",
-         }}),
+         "WFContentItemInputParameter": "Library"},
+        name="闹钟", uid=A_ALM),
 
-    # 3. 逐个检查，只处理名字含「排班」的
+    # 7. 逐个看：名字含「排班」才关掉
     act("is.workflow.actions.repeat.each",
-        {"GroupingIdentifier": G_DEL, "WFControlFlowMode": 0,
+        {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 0,
          "WFInput": attach(out(A_ALM, "闹钟"))}),
 
-    # 3a. 名字含「排班」才删，别的闹钟一律不碰
-    #     直接取闹钟实体的 label 属性（比转成文本再匹配准，见参考实现
-    #     WFLinkEntityContentPropertyUserInfoPropertyIdentifier: 'label'）
-    if_block(G_IFDEL, 0,
+    if_block(G_IF, 0,
              WFInput=cond_input(ref("Repeat Item", [ALARM_LABEL_AGG])),
              WFCondition=99,
              WFConditionalActionString=LABEL),
 
-    act("com.apple.mobiletimer.DeleteAlarmIntent",
-        {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="DeleteAlarmIntent"),
-         # entities 只需要一层 WFTextTokenAttachment，多包一层 iOS 就认不出实体，
-         # 会退化成弹窗让用户手选闹钟。
-         "entities": attach(ref("Repeat Item"))}),
-
-    if_block(G_IFDEL, 2),
-
-    # 3b. 闹钟循环结束
-    act("is.workflow.actions.repeat.each",
-        {"GroupingIdentifier": G_DEL, "WFControlFlowMode": 2}),
-
-    # 4. 兜底提前量（备注没写时用它）
-    act("is.workflow.actions.number",
-        {"WFNumberActionNumber": LEAD, "UUID": A_DEFAULT}),
-    act("is.workflow.actions.setvariable",
-        {"WFInput": attach(out(A_DEFAULT, "数字")), "WFVariableName": "提前分钟"}),
-
-    # 5. 循环每个日程
-    act("is.workflow.actions.repeat.each",
-        {"GroupingIdentifier": G_LOOP, "WFControlFlowMode": 0,
-         "WFInput": attach(out(A_CAL, "日历日程"))}),
-
-    act("is.workflow.actions.properties.calendarevents",
-        {"WFContentItemPropertyName": "Start Date",
-         "WFInput": var("Repeat Item"), "UUID": A_START}),
-
-    act("is.workflow.actions.properties.calendarevents",
-        {"WFContentItemPropertyName": "Title",
-         "WFInput": var("Repeat Item"), "UUID": A_TITLE}),
-
-    act("is.workflow.actions.properties.calendarevents",
-        {"WFContentItemPropertyName": "Notes",
-         "WFInput": var("Repeat Item"), "UUID": A_NOTES}),
-
-    # 6. 从备注里抠出「预留：N」
-    act("is.workflow.actions.text.match",
-        {"text": token([out(A_NOTES, "备注")]),
-         "WFMatchTextPattern": PATTERN,
-         "WFMatchTextCaseSensitive": False,
-         "UUID": A_MATCH}),
-
-    # 6a. 命中才覆盖提前量
-    if_block(G_IF, 0, WFInput=cond_input(out(A_MATCH, "匹配文本")), WFCondition=101),
-
-    act("is.workflow.actions.text.match.getgroup",
-        {"matches": attach(out(A_MATCH, "匹配文本")),
-         "WFGetGroupType": "Group At Index",
-         "WFGroupIndex": 1,
-         "UUID": A_GROUP}),
-
-    act("is.workflow.actions.detect.number",
-        {"WFInput": attach(out(A_GROUP, "分组")), "UUID": A_NUM}),
-
-    act("is.workflow.actions.setvariable",
-        {"WFInput": attach(out(A_NUM, "数字")), "WFVariableName": "提前分钟"}),
+    # 8. 关掉旧闹钟（Toggle：不删除、不弹窗）
+    act("com.apple.mobiletimer-framework.MobileTimerIntents.MTToggleAlarmIntent",
+        {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="ToggleAlarmIntent"),
+         # 只需要一层 WFTextTokenAttachment，多包一层 iOS 就认不出实体，会弹窗
+         "alarm": attach(ref("Repeat Item")),
+         "operation": "turn",
+         "state": 0,
+         "ShowWhenRun": False}),
 
     if_block(G_IF, 2),
+    act("is.workflow.actions.repeat.each",
+        {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 2}),
 
-    # 7. 开始时间往回推「提前分钟」
-    act("is.workflow.actions.adjustdate",
-        {"WFAdjustOperation": "Subtract",
-         "WFDate": token([out(A_START, "开始时间")]),
-         "WFDuration": {"Value": {"Magnitude": ref("提前分钟"), "Unit": "min"},
-                        "WFSerializationType": "WFQuantityFieldValue"},
-         "UUID": A_ADJUST}),
-
-    act("is.workflow.actions.setvariable",
-        {"WFInput": attach(out(A_ADJUST, "调整后的日期")),
-         "WFVariableName": "排班时间"}),
-
-    # 8. 建闹钟：时间取「排班时间」的 .Time
+    # 9. 建新闹钟：时间取「日期」的 .Time
     act("com.apple.mobiletimer-framework.MobileTimerIntents.MTCreateAlarmIntent",
         {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="CreateAlarmIntent"),
          "ShowWhenRun": False,
-         "dateComponents": token([ref("排班时间", [
-             {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}])]),
-         # 标签必须带「排班」前缀：下次运行靠它认出这是自己建的闹钟，
-         # 否则删旧时匹配不到，闹钟会一天天堆积
-         "label": token([ALARM_PREFIX, out(A_TITLE, "标题")]),
-         "name": token([ALARM_PREFIX, out(A_TITLE, "标题")]),
+         # 取日期的 .Time 属性：闹钟只要「时:分」
+         "dateComponents": token([out(A_DATE, "日期", [TIME_AGG])]),
+         "label": token([out(A_LABEL, "闹钟名")]),
+         "name": token([out(A_LABEL, "闹钟名")]),
          "repeatSchedule": {"displayString": "Never", "value": 0},
          "allowsSnooze": True}),
 
-    # 9. 日程循环结束
-    act("is.workflow.actions.repeat.each",
-        {"GroupingIdentifier": G_LOOP, "WFControlFlowMode": 2}),
+    # 10. 没有 due：提示一句，不建闹钟
+    if_block(G_MAIN, 1),
+    act("is.workflow.actions.notification",
+        {"WFNotificationActionTitle": "排班闹钟",
+         "WFNotificationActionBody":
+             "今天和之后的排班都没有需要新建的闹钟，本次不建。"}),
+    if_block(G_MAIN, 2),
 ]
 
 data = {
