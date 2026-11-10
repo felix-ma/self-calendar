@@ -125,7 +125,8 @@ chmod 600 ~/.config/paiban/caldav.env
 - 打车：`OSRM 车程 × traffic_factor + extra_min`（1.8 折算高峰，+8 分钟等车）
 
 结果取整到 5 分钟、夹在 `min_alarm` / `max_alarm` 之间，写进该事件的 `VALARM`。
-远的班次提醒早、近的提醒晚；事件备注里也会写「通勤：打车 X km，预留 N 分钟」。
+远的班次提醒早、近的提醒晚；这个数就是「预留」，写在事件备注第一行
+（`预留：N 分钟`），iOS 快捷指令据此建同一时刻的闹钟。
 
 - 起点、坐标、车程、通勤方式都在 `commute.json`（本机配置）
 - 改速度、系数或某家的 `km` / `drive_min`，重新 `publish` 生效

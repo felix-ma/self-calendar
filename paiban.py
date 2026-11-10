@@ -292,7 +292,11 @@ def parse_alarm(v):
 
 
 def alarm_info(e: dict, fixed=None):
-    """返回 (提前分钟, 交通方式, 距离km)。5km 内电动车，更远打车。"""
+    """返回 (通勤预留分钟, 交通方式, 距离km)。5km 内电动车，更远打车。
+
+    这是「该出发了」的提前量，只用于日历提醒（VALARM）和备注文案；
+    闹钟由 iOS 快捷指令按班次开始时间建，不读这个值。
+    """
     if fixed is not None:
         return fixed, "", 0.0
     c = load_commute()
@@ -393,8 +397,10 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
     minutes, mode, km = alarm_info(e, fixed_alarm)
     desc = ""
     if minutes:
-        # 放在最前面：保证不会被 iCalendar 75 字节折行切断
-        desc = f"闹钟提前：{minutes} 分钟\n"
+        # 第一行单独放「预留：N 分钟」，两个用途：
+        #   1. 人和快捷指令都能读：闹钟与日历提醒用同一个提前量
+        #   2. 这一行足够短，不会被 iCalendar 的 75 字节折行切断
+        desc = f"预留：{minutes} 分钟\n"
     desc += f"班次：{shift} {cfg['start']}-{cfg['end']}"
     if cfg.get("note"):
         desc += f"（{cfg['note']}）"
@@ -403,7 +409,8 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
         if addr:
             desc += f"\n地址：{addr}"
     if minutes:
-        desc += f"\n通勤：{mode} {km:.1f} km，预留 {minutes} 分钟"
+        leave = datetime.combine(day, dtime.fromisoformat(cfg["start"])) - timedelta(minutes=minutes)
+        desc += f"\n通勤：{mode} {km:.1f} km，{leave.strftime('%H:%M')} 出发"
     lines = [
         "BEGIN:VEVENT",
         f"UID:{e['uid']}",
@@ -454,7 +461,13 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
     """导出全部未结束班次的闹钟清单。
 
     默认 days=0 表示不截断（覆盖所有未结束班次）；给正数则只看未来这么多天。
-    快捷指令流程：删掉 label 以「排班」开头的旧闹钟 -> 按 at 新建。
+    字段语义（别混）：
+      at          闹钟响铃时间 = 班次开始 - 通勤预留（跟日历提醒同一时刻）
+      time        同上，只取 HH:MM
+      start       班次开始时间
+      start_time  同上，只取 HH:MM
+      lead/notify 通勤预留分钟
+    快捷指令流程：删掉 label 含「排班」的旧闹钟 -> 按 at 新建。
     """
     events, _ = collect_events(schedule, keep_all)
     now = datetime.now(TZOFF)
@@ -471,11 +484,13 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
         out.append({
             "label": f"{ALARM_LABEL}·{e['shift']}",
             "at": at.strftime("%Y-%m-%dT%H:%M:00"),
+            "start": start_dt.strftime("%Y-%m-%dT%H:%M:00"),
             "time": at.strftime("%H:%M"),
+            "start_time": start_dt.strftime("%H:%M"),
             "date": e["day"].isoformat(),
             "shift": e["shift"],
-            "notify": minutes,
             "commute": mode,
+            "lead": minutes,
         })
     out.sort(key=lambda x: x["at"])
     data = {

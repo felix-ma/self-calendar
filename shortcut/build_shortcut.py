@@ -4,7 +4,10 @@
 流程：
   1. 找今天三个排班日历里标题含「班」的日程
   2. 找时钟里所有闹钟，只删名字含「排班」的（二次确认，避免误删别的闹钟）
-  3. 按每个日程的开始时间，减去备注里的「闹钟提前：N 分钟」，建新闹钟
+  3. 按每个日程的开始时间，减去备注里的「预留：N 分钟」，建新闹钟
+
+闹钟与日历提醒用同一个提前量：都是「该出发了」的时刻。
+提前量来自备注第一行的「预留：N 分钟」，由 paiban.py 按通勤算好。
 """
 import plistlib, uuid, sys
 from pathlib import Path
@@ -69,10 +72,10 @@ def if_block(group, mode, **kw):
     return act("is.workflow.actions.conditional", p)
 
 
-LEAD = 60            # 兜底提前分钟：备注里没有「闹钟提前：N」时用这个
-LABEL = "排班"        # 闹钟标签的识别关键字（Find Alarms 与 If 都用它）
-ALARM_PREFIX = "排班·"  # 新建闹钟的标签前缀，保证下次能认出来
-PATTERN = "闹钟提前：(\\d+)"
+LEAD = 60              # 兜底提前分钟：备注里没有「预留：N」时用这个
+LABEL = "排班"          # 闹钟标签的识别关键字：Find Alarms、If、新建前缀都用它
+ALARM_PREFIX = "排班·"   # 新建闹钟的标签前缀，保证下次运行能认出自己建的
+PATTERN = "预留：(\\d+)"
 
 CLOCK = {"ActionRequiresAppInstallation": True,
          "BundleIdentifier": "com.apple.mobiletimer",
@@ -84,14 +87,14 @@ ALARM_LABEL_AGG = {"PropertyName": "label",
                        "WFLinkEntityContentPropertyUserInfoPropertyIdentifier": "label"},
                    "Type": "WFPropertyVariableAggrandizement"}
 
-A_CAL, A_ALM, A_ALMTEXT = U(), U(), U()
+A_CAL, A_ALM = U(), U()
 A_START, A_TITLE, A_NOTES = U(), U(), U()
 A_MATCH, A_GROUP, A_NUM, A_ADJUST, A_DEFAULT = U(), U(), U(), U(), U()
 G_DEL, G_IFDEL, G_LOOP, G_IF = U(), U(), U(), U()
 
 
 def calendar_filter():
-    """未来 1 天内、标题含「班」、非全天——AND 关系。"""
+    """今天、标题含「班」、非全天——AND 关系。"""
     return {
         "Value": {
             "WFActionParameterFilterPrefix": 1,
@@ -114,9 +117,9 @@ def calendar_filter():
 actions = [
     act("is.workflow.actions.comment", {"WFCommentActionText":
         "每天自动跑：找出今天标题含「班」的日程，删掉时钟里名字含「排班」的旧闹钟，"
-        "再按日程备注里的「闹钟提前：N 分钟」建新闹钟。\n\n"
-        "提前量跟日历提醒用的通勤时间一致，来自备注第一行；没有这行时退回 "
-        + str(LEAD) + " 分钟。\n"
+        "再按日程备注里的「预留：N 分钟」往前推着建新闹钟。\n\n"
+        "闹钟与日历提醒同一时刻响（都是该出发的时间），提前量由 paiban.py 按通勤算好，"
+        "写在备注第一行；没有这行时退回 " + str(LEAD) + " 分钟。\n"
         "建议在「自动化」里加一个每天 00:05 的「时间」触发，并关掉「运行前询问」。"
     }),
 
@@ -129,7 +132,7 @@ actions = [
 
     # 2. 找时钟里名字带「排班」的闹钟
     #    属性名是小写 "label"（与参考实现一致，枚举里的 identifier 就是 label）；
-    #    后面第 3b 步还会再判一次，双保险：即使这里没过滤住也不会误删别的闹钟
+    #    后面第 3a 步还会再判一次，双保险：即使这里没过滤住也不会误删别的闹钟
     act("com.apple.mobiletimer-framework.MobileTimerIntents.MTGetAlarmsIntent",
         {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="AlarmEntity"),
          "ShowWhenRun": False,
@@ -168,11 +171,11 @@ actions = [
 
     if_block(G_IFDEL, 2),
 
-    # 3c. 闹钟循环结束
+    # 3b. 闹钟循环结束
     act("is.workflow.actions.repeat.each",
         {"GroupingIdentifier": G_DEL, "WFControlFlowMode": 2}),
 
-    # 4. 兜底提前量
+    # 4. 兜底提前量（备注没写时用它）
     act("is.workflow.actions.number",
         {"WFNumberActionNumber": LEAD, "UUID": A_DEFAULT}),
     act("is.workflow.actions.setvariable",
@@ -195,7 +198,7 @@ actions = [
         {"WFContentItemPropertyName": "Notes",
          "WFInput": var("Repeat Item"), "UUID": A_NOTES}),
 
-    # 6. 从备注里抠出「闹钟提前：N」
+    # 6. 从备注里抠出「预留：N」
     act("is.workflow.actions.text.match",
         {"text": token([out(A_NOTES, "备注")]),
          "WFMatchTextPattern": PATTERN,
@@ -219,12 +222,11 @@ actions = [
 
     if_block(G_IF, 2),
 
-    # 7. 开始时间往回推
+    # 7. 开始时间往回推「提前分钟」
     act("is.workflow.actions.adjustdate",
         {"WFAdjustOperation": "Subtract",
          "WFDate": token([out(A_START, "开始时间")]),
-         "WFDuration": {"Value": {"Magnitude": ref("提前分钟"),
-                                  "Unit": "min"},
+         "WFDuration": {"Value": {"Magnitude": ref("提前分钟"), "Unit": "min"},
                         "WFSerializationType": "WFQuantityFieldValue"},
          "UUID": A_ADJUST}),
 

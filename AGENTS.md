@@ -70,8 +70,9 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - 共享给别人时三个日历要**分别共享**；共享后 `VALARM` 会一起带过去，提醒不会退化
 - `docs/alarms.json`：全部未结束班次的闹钟清单（date/time/label/notify/commute），
   `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断
-- iOS 快捷指令（`shortcut/`）：读 iCloud 日历的「闹钟提前：N 分钟」备注行，
-  删掉 label 含「排班」的旧闹钟后按备注提前量重建；已签名文件随仓库提交
+- iOS 快捷指令（`shortcut/`）：读 iCloud 日历备注第一行「预留：N 分钟」，
+  删掉 label 含「排班」的旧闹钟后按同一提前量重建（闹钟与提醒同时刻响）；
+  已签名文件随仓库提交
 - 页面按钮：`docs/paiban-alarm.shortcut` 是给下载按钮用的副本（直接下载，不再用
   `shortcuts://` 前缀）；每次重新签名后要
   `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`

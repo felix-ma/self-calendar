@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-10T20:31:25",
+  "generated_at": "2026-11-10T20:58:28",
   "timezone": "Asia/Shanghai",
   "label_prefix": "排班",
   "window_days": 0,
@@ -8,47 +8,57 @@
     {
       "label": "排班·晚班",
       "at": "2026-11-11T14:45:00",
+      "start": "2026-11-11T15:00:00",
       "time": "14:45",
+      "start_time": "15:00",
       "date": "2026-11-11",
       "shift": "晚班",
-      "notify": 15,
-      "commute": "骑电动车"
+      "commute": "骑电动车",
+      "lead": 15
     },
     {
       "label": "排班·白班",
       "at": "2026-11-12T07:35:00",
+      "start": "2026-11-12T08:00:00",
       "time": "07:35",
+      "start_time": "08:00",
       "date": "2026-11-12",
       "shift": "白班",
-      "notify": 25,
-      "commute": "骑电动车"
+      "commute": "骑电动车",
+      "lead": 25
     },
     {
       "label": "排班·早班",
       "at": "2026-11-13T07:45:00",
+      "start": "2026-11-13T08:00:00",
       "time": "07:45",
+      "start_time": "08:00",
       "date": "2026-11-13",
       "shift": "早班",
-      "notify": 15,
-      "commute": "骑电动车"
+      "commute": "骑电动车",
+      "lead": 15
     },
     {
       "label": "排班·早班",
       "at": "2026-11-14T07:45:00",
+      "start": "2026-11-14T08:00:00",
       "time": "07:45",
+      "start_time": "08:00",
       "date": "2026-11-14",
       "shift": "早班",
-      "notify": 15,
-      "commute": "骑电动车"
+      "commute": "骑电动车",
+      "lead": 15
     },
     {
       "label": "排班·早班",
       "at": "2026-11-15T07:45:00",
+      "start": "2026-11-15T08:00:00",
       "time": "07:45",
+      "start_time": "08:00",
       "date": "2026-11-15",
       "shift": "早班",
-      "notify": 15,
-      "commute": "骑电动车"
+      "commute": "骑电动车",
+      "lead": 15
     }
   ]
 }
