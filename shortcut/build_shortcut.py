@@ -162,7 +162,9 @@ actions = [
 
     act("com.apple.mobiletimer.DeleteAlarmIntent",
         {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="DeleteAlarmIntent"),
-         "entities": attach(var("Repeat Item"))}),
+         # entities 只需要一层 WFTextTokenAttachment，多包一层 iOS 就认不出实体，
+         # 会退化成弹窗让用户手选闹钟。
+         "entities": attach(ref("Repeat Item"))}),
 
     if_block(G_IFDEL, 2),
 
