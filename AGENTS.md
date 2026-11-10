@@ -72,9 +72,9 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断
 - iOS 快捷指令（`shortcut/`）：读 iCloud 日历的「闹钟提前：N 分钟」备注行，
   删掉 label 含「排班」的旧闹钟后按备注提前量重建；已签名文件随仓库提交
-- 页面按钮：`docs/paiban-alarm.shortcut` 是给导入按钮用的副本，
-  用 `shortcuts://import-shortcut?url=..&name=..` 唤起快捷指令 App；
-  每次重新签名后要 `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`
+- 页面按钮：`docs/paiban-alarm.shortcut` 是给下载按钮用的副本（直接下载，不再用
+  `shortcuts://` 前缀）；每次重新签名后要
+  `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`
 
 ## 提醒与通勤
 

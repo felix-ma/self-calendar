@@ -1,19 +1,10 @@
 {
-  "generated_at": "2026-11-09T23:52:23",
+  "generated_at": "2026-11-10T20:31:25",
   "timezone": "Asia/Shanghai",
   "label_prefix": "排班",
   "window_days": 0,
-  "count": 6,
+  "count": 5,
   "alarms": [
-    {
-      "label": "排班·早班",
-      "at": "2026-11-10T07:30:00",
-      "time": "07:30",
-      "date": "2026-11-10",
-      "shift": "早班",
-      "notify": 30,
-      "commute": "打车"
-    },
     {
       "label": "排班·晚班",
       "at": "2026-11-11T14:45:00",

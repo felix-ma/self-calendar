@@ -14,8 +14,8 @@ cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用
 
 ## 导入方式
 1. **页面按钮**：打开 <https://felix-ma.github.io/self-calendar/>，
-   点「导入闹钟快捷指令」，Safari 会直接唤起快捷指令 App
-   （用的是 Apple 官方 URL 方案 `shortcuts://import-shortcut`）
+   点「下载闹钟快捷指令」，得到 `paiban-alarm.shortcut`；
+   在 Safari 的下载项里点开它，就会加入快捷指令 App
 2. **AirDrop**：把 `.shortcut` 传到 iPhone
 3. **文件 App**：下载后点开
 
@@ -31,8 +31,9 @@ cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用
 快捷指令读到这个数字就用它；备注里没有这行时才退回默认 60 分钟。
 
 ## 它做什么
-1. 找**未来 24 小时内**、**标题含「班」**、**非全天**的日历日程
-2. 找时钟里**名字含「排班」**的旧闹钟，全部删除
+1. 找**今天**、**标题含「班」**、**非全天**的日历日程
+2. 找时钟里 **label 含「排班」** 的旧闹钟，全部删除
+   （Find Alarms 里先按 label 过滤，循环里再用 label 属性判一次，不会碰别的闹钟）
 3. 逐个日程：读备注里的提前量 → 开始时间往回推 → 建新闹钟
    闹钟标签沿用日程标题（如「早班·门店」）
 
