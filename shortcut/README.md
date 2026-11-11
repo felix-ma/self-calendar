@@ -20,6 +20,31 @@ cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用
 .venv/bin/python -m pip install -r requirements.txt   # 含 shortcutkit>=3.2
 ```
 
+## 诊断版（真机排查用）
+
+主指令出问题、又看不出卡在哪时，用带日志的版本：
+
+```bash
+.venv/bin/python shortcut/build_shortcut.py /tmp/debug.plist --debug
+.venv/bin/python shortcut/sign.py /tmp/debug.plist "shortcut/排班闹钟·诊断.shortcut"
+cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
+```
+
+它在每个关键节点往「日志」变量追加一行，末尾自动复制到剪贴板并显示出来，
+整段复制回来就能定位。日志内容：
+
+| 行 | 含义 |
+| --- | --- |
+| ① 拉取 alarms.json → 成功 | 网络与 JSON 拉取正常 |
+| ② alarms[] 条数 | 清单里有几条班次（0 = 数据源空） |
+| 第 N 条：at=… 距今 … 秒 | 每条的判断依据；负数表示已过，>86400 表示超一天 |
+| ③ 挑选结果——已完成=是/否 | 有没有挑到 |
+| ④ 带过滤 N 个；不带过滤 M 个 | N<M 过滤有效；都是 0 读不到闹钟；N=M>0 过滤被忽略 |
+| label=[…] 含「排班」✓ | 逐个闹钟的标签和判定 |
+| ⑤ 已存在？是/否 | 决定开旧的还是新建 |
+
+正常版不插这些动作（`--debug` 不加就一个都不插），免得每天跑多做几十步。
+
 ## 为什么用 shortcutkit 生成
 它把 Shortcuts 引擎里的**动作目录**（449 个内置动作 + 1265 个 Apple 应用动作）
 做成了带类型校验的 Python API。写错参数名不是"生成一个坏文件"，而是当场抛

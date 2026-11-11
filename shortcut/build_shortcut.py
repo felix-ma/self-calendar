@@ -66,6 +66,8 @@ CLIENT_VERSION = "1092.9.13.2"
 
 ALARM_ENTITY_CLASS = "WFLinkEntityContentItem_com.apple.clock_AlarmEntity"
 
+LOGGER = "日志"            # debug 版的累积变量名
+
 
 def act(s, identifier, name=None, **params):
     """加一个动作；name 非空时写 CustomOutputName，作为它的输出名。
@@ -123,8 +125,22 @@ def alarm_label(attachment):
                            "PropertyName": "label"}]}}
 
 
-def build_main():
+def build_main(debug=False):
+    """生成主指令。debug=True 时插入日志，用于真机排查。"""
     s = sk.Shortcut(SHORTCUT_NAME, color=4282601983, glyph=59649)
+
+    # ── 诊断日志 ──────────────────────────────────────────────────────────
+    # 只在 debug=True 时插入。每个关键节点往「日志」变量里追加一行，最后
+    # 复制到剪贴板并显示出来，方便整段复制回帖。正常版一条都不插，
+    # 免得真机每天跑都要多做几十个动作。
+    def log(*parts):
+        if not debug:
+            return
+        s.action(A.APPENDVARIABLE, WFInput=sk.text(*parts), WFVariableName=LOGGER)
+
+    if debug:
+        s.action(A.SETVARIABLE, WFInput=sk.text(""), WFVariableName=LOGGER)
+
 
     s.action("is.workflow.actions.comment", WFCommentActionText=(
         "每天自动跑：拉取线上排班清单（alarms.json），用「当前时间」在 alarms[] 里"
@@ -153,6 +169,12 @@ def build_main():
     all_shift = act(s, A.GETVALUEFORKEY, "全部班次", WFInput=ref(data),
                     WFGetDictionaryValueType="Value", WFDictionaryKey="alarms")
 
+    if debug:
+        count_all = act(s, A.COUNT, "班次条数", Input=ref(all_shift),
+                        WFCountType="Items")
+        log("① 拉取 alarms.json → 成功\n")
+        log("② alarms[] 条数：", sk.text(ref(count_all)), "\n")
+
     # ── 2. 逐条比较，挑第一条符合条件的 ─────────────────────────────────────
     # 用字符串「是/否」做标志位，「is」比较最稳。
     s.action(A.SETVARIABLE, WFInput=sk.text("否"), WFVariableName="已完成")
@@ -169,6 +191,9 @@ def build_main():
               WFTimeUntilFromDate=sk.text(sk.current_date()),
               WFTimeUntilUnit="Total Time")   # Total Time 的单位就是秒
 
+    log("   第 ", sk.text(sk.repeat_index()), " 条：at=", sk.text(ref(at)),
+        " 距今 ", sk.text(ref(gap)), " 秒\n")
+
     future = num_if(s, ref(gap), "greater_than", 0)             # 已经过了的不算
     soon = num_if(s, ref(gap), "less_or_equal", DAY_SECONDS)    # 只用 24 小时内的
 
@@ -180,9 +205,12 @@ def build_main():
     s.end_if(todo)
     s.end_repeat_each(loop)
 
+    log("③ 挑选结果——已完成=", sk.text(sk.variable("已完成")), "\n")
+
     # ── 3. 挑到了才继续 ────────────────────────────────────────────────────
     picked = s.if_(sk.coerce(sk.variable("已完成"), "WFStringContentItem"),
                    "is", "是")
+    log("   选中班次：")
 
     at2 = act(s, A.GETVALUEFORKEY, "响铃时刻", WFInput=sk.variable("目标"),
               WFGetDictionaryValueType="Value", WFDictionaryKey="at")
@@ -195,6 +223,8 @@ def build_main():
     # 目标标签 = 「排班·早班 07:45」，既是闹钟名，也是「同一个闹钟」的判据
     s.action(A.SETVARIABLE, WFInput=sk.text(ref(named), " ", ref(hhmm)),
              WFVariableName="目标标签")
+    log(sk.text(ref(named)), " ", sk.text(ref(hhmm)),
+        "（响铃 ", sk.text(sk.property_(ref(when2), "Time")), "）\n")
 
     # ── 4. 处理时钟里已有的排班闹钟 ────────────────────────────────────────
     # 过滤器交给 Find Alarms 自己做（label contains「排班」），循环里再判一次，
@@ -203,18 +233,36 @@ def build_main():
                  WFContentItemInputParameter="Library",
                  WFContentItemFilter=sk.where(("label", "contains", LABEL)))
 
+    if debug:
+        count_alarm = act(s, A.COUNT, "闹钟条数", Input=ref(alarms),
+                          WFCountType="Items")
+        # 再查一次「不带任何过滤」，两条数一对比就知道是过滤失效、
+        # 还是压根读不到闹钟。
+        all_alarms = act(s, A.CLOCK_FIND_ALARMS, "全部闹钟",
+                         WFContentItemInputParameter="Library")
+        count_all_alarm = act(s, A.COUNT, "全部闹钟条数", Input=ref(all_alarms),
+                              WFCountType="Items")
+        log("④ 时钟里找到（带「排班」过滤）：", sk.text(ref(count_alarm)),
+            " 个；不带过滤：", sk.text(ref(count_all_alarm)), " 个\n")
+        log("   若两个数不同 → 过滤有效；都相同且为 0 → 读不到闹钟；"
+            "都为 N 且过滤不起作用 → 过滤被忽略\n")
+
     s.action(A.SETVARIABLE, WFInput=sk.text("否"), WFVariableName="已存在")
 
     each_alarm = s.repeat_each(ref(alarms))
+    log("   label=[", sk.text(alarm_label(sk.repeat_item())), "]")
     mine = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
+    log(" 含「排班」✓\n")
     same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(sk.variable("目标标签")))
 
     s.action(A.SETVARIABLE, WFInput=sk.text("是"), WFVariableName="已存在")
+    log(" 同名，打开\n")
     # 同名闹钟：确保它是开着的（可能是之前关掉的）
     s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
              operation="turn", state=True, ShowWhenRun=False)
 
     s.otherwise(same)
+    log(" 是旧闹钟，关掉\n")
     # 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
     s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
              operation="turn", state=False, ShowWhenRun=False)
@@ -234,12 +282,21 @@ def build_main():
              allowsSnooze=True)
     s.end_if(missing)
 
+    log("⑤ 已存在？", sk.text(sk.variable("已存在")), "\n")
+
     # ── 6. 没挑到：提示一句，不建闹钟 ──────────────────────────────────────
     s.otherwise(picked)
+    log("③ 没挑到班次，不建闹钟\n")
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody="24 小时内没有要建的排班闹钟，本次不建。")
     s.end_if(picked)
+
+    # ── 7. 诊断版：把日志复制到剪贴板并显示出来 ──────────────────────────
+    if debug:
+        s.action(A.SETCLIPBOARD, WFInput=sk.variable(LOGGER))
+        s.action(A.SHOWRESULT, Text=sk.text("排班闹钟·诊断日志\n\n",
+                                            sk.text(sk.variable(LOGGER))))
 
     return s
 
@@ -253,7 +310,9 @@ def to_xml(shortcut):
 
 
 if __name__ == "__main__":
-    dst = Path(sys.argv[1] if len(sys.argv) > 1 else "排班闹钟.plist")
-    data = to_xml(build_main())
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    debug = "--debug" in sys.argv
+    dst = Path(argv[0] if argv else "排班闹钟.plist")
+    data = to_xml(build_main(debug=debug))
     dst.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_XML))
     print(f"已生成 {dst}（{len(data['WFWorkflowActions'])} 个动作）")
