@@ -87,6 +87,10 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   逻辑变了就让用户从页面重新下载一次，数据变化不用重装
 - 页面按钮：`docs/paiban-alarm.shortcut` 是下载副本（直接下载，不用 `shortcuts://` 前缀）；
   每次重新签名后要 `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`
+- 快捷指令生成器 `shortcut/build_shortcut.py` 用 **shortcutkit** 写（动作目录会校验参数名，
+  写错当场 `ValueError: unknown parameter(s)`），**必须 `.venv/bin/python` 跑**；
+  签名用 `shortcut/sign.py`（远程 `playground.cherrilang.org`，产物首字节 `AEA1`）。
+  两条命令见 `shortcut/README.md`「重新生成」
 
 ## 提醒与通勤
 
@@ -112,15 +116,17 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 
 ## 依赖
 
-- 主程序 `paiban.py` 与 `shortcut/build_shortcut.py` **只用 Python 标准库**（3.10+），
-  系统 `python3` 直接跑即可；识别走 HTTP 接口，不需要 OCR、不需要 GitHub Actions。
-- 唯一第三方包 `PyYAML`，只给「凭据」一节取 `DEEPSEEK_API_KEY` 的辅助命令用。
+- 主程序 `paiban.py` **只用 Python 标准库**（3.10+），系统 `python3` 直接跑即可；
+  识别走 HTTP 接口，不需要 OCR、不需要 GitHub Actions。
+- 两个第三方包：`PyYAML`（「凭据」一节取 `DEEPSEEK_API_KEY` 用）、
+  `shortcutkit`（`shortcut/build_shortcut.py` 生成快捷指令用，动作目录能当场校验参数名）。
+  **`build_shortcut.py` 必须用 `.venv/bin/python` 跑**，系统 python3 里没有 shortcutkit。
 - 运行时 Linux 环境常被重置、系统装过的包会被清空，因此依赖放进**项目内 venv**，
   不污染系统 Python、可一键重建：
 
   | 路径 | 作用 |
   | --- | --- |
-  | `requirements.txt` | 依赖声明 `PyYAML>=6.0`（随仓库提交） |
+  | `requirements.txt` | 依赖声明 `PyYAML>=6.0`、`shortcutkit>=3.2`（随仓库提交） |
   | `.venv/` | 项目内虚拟环境，已 gitignore，**不入库** |
 
   环境重置后重建（项目根目录）：
@@ -130,7 +136,7 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   .venv/bin/python -m pip install -r requirements.txt
   ```
 
-  用 venv 跑（推荐，取 Key 辅助命令也依赖它）：`.venv/bin/python paiban.py status`；
+  用 venv 跑（推荐，取 Key 与生成快捷指令都依赖它）：`.venv/bin/python paiban.py status`；
   或 `source .venv/bin/activate` 激活后照常写 `python3`。
 
 - 主程序**不依赖 `.venv`**：删掉它，系统 `python3 paiban.py` 仍能生成、同步、发布；

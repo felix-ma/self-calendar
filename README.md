@@ -22,19 +22,22 @@ images/*.png ──recognize──> schedule.json ──build──> docs/schedu
 
 ## 环境与依赖
 
-主程序 `paiban.py` 和 `shortcut/build_shortcut.py` **只用 Python 标准库**（3.10+），
-系统 `python3` 直接跑即可，主流程不需要装任何第三方包。
+主程序 `paiban.py` **只用 Python 标准库**（3.10+），系统 `python3` 直接跑即可，
+生成、同步、发布都不需要装任何第三方包。
 
-唯一的第三方依赖是 `PyYAML`，仅供「从本机凭据文件读取 `DEEPSEEK_API_KEY`」这条辅助命令
-使用（见 AGENTS.md「凭据」一节）。不导出 Key、让 `publish` / `update` 沿用现有
-`schedule.json` 时，连它也不需要。
+另有两个第三方依赖，都只在特定场合用到：
+
+| 包 | 谁用 | 不装会怎样 |
+| --- | --- | --- |
+| `PyYAML` | 「从本机凭据文件读取 `DEEPSEEK_API_KEY`」这条辅助命令 | 报 `No module named 'yaml'`；不导出 Key 时 `publish`/`update` 沿用现有 `schedule.json`，照常工作 |
+| `shortcutkit` | `shortcut/build_shortcut.py`（生成 iOS 捷径的 plist） | 报 `No module named 'shortcutkit'`；不影响日历主流程 |
 
 运行时 Linux 环境常被重置、系统安装的包会被清空。为此把依赖放进**项目内的虚拟环境**，
 声明化、可一键重建，且不污染系统 Python：
 
 | 路径 | 作用 |
 | --- | --- |
-| `requirements.txt` | 依赖声明 `PyYAML>=6.0`（随仓库提交） |
+| `requirements.txt` | 依赖声明 `PyYAML>=6.0`、`shortcutkit>=3.2`（随仓库提交） |
 | `.venv/` | 项目内虚拟环境，已 gitignore，**不入库** |
 
 环境重置后重建（项目根目录）：
@@ -44,7 +47,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-用 venv 跑（推荐，取 Key 辅助命令也依赖它）：
+用 venv 跑（推荐，取 Key 辅助命令与重新生成快捷指令都依赖它）：
 
 ```bash
 .venv/bin/python paiban.py status
@@ -53,7 +56,7 @@ source .venv/bin/activate
 ```
 
 > 主程序本身不依赖 `.venv`：删掉它，系统 `python3 paiban.py` 仍能生成、同步、发布；
-> 只有取 Key 辅助命令会因缺 PyYAML 失败（报 `No module named 'yaml'`），按上面重建即可。
+> 只有取 Key 辅助命令（缺 PyYAML）和重新生成快捷指令（缺 shortcutkit）需要它，按上面重建即可。
 
 ## 日常用法
 
@@ -134,10 +137,24 @@ chmod 600 ~/.config/paiban/caldav.env
 - 某家想固定方式：加 `"mode": "ebike"` 或 `"taxi"`，否则按 5 km 规则自动判断
 - `--alarm off` 关闭提醒，`--alarm 30` 统一提前 30 分钟
 
+## iOS 闹钟
+
+日历提醒会响，但手机静音/专注模式下容易错过，所以另配一个快捷指令，在**时钟里**
+也建一个同一时刻的闹钟。iOS 没有读写时钟的 API，只能靠「快捷指令」的
+Find / Toggle / Add 三个动作，所以文件由 `shortcut/` 生成、签名后随仓库提交：
+
+- 页面按钮下载：<https://felix-ma.github.io/self-calendar/>
+- 每天在「自动化」里跑一次（建议 00:05，关掉「运行前询问」）
+- 它拉 `docs/alarms.json`，用**运行时的当前时间**挑出下一条 24 小时内的班次，
+  同名闹钟已存在就打开、其它「排班…」闹钟关掉、都没有才新建
+
+闹钟名形如 `排班·早班 07:45`，所以反复运行只维护一个闹钟，不会越攒越多。
+细节见 `shortcut/README.md`。
+
 ## 设计取舍
 
 - **纯标准库**：主程序免装依赖，ICS 折行、VTIMEZONE、CalDAV 都手写；
-  唯一第三方包 PyYAML 只给取 Key 辅助命令用，已隔离进 `.venv`（见「环境与依赖」）
+  PyYAML（取 Key）与 shortcutkit（生成快捷指令）都隔离进 `.venv`（见「环境与依赖」）
 - **`.ics` 提交进仓库**：Pages 只提供静态文件；页面每次打开都带时间戳重新拉取，不受缓存影响
 - **只生成未来班次**：文件小，手机日历也不会被历史占满
 - **按日历分色**：iOS 不支持事件级颜色，写 `COLOR` 也不认，只能拆日历

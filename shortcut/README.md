@@ -2,15 +2,41 @@
 
 ## 文件
 - `排班闹钟.shortcut` —— 已签名，每天自动跑
-- `build_shortcut.py` —— 生成器
+- `build_shortcut.py` —— 生成器（用 [shortcutkit](https://github.com/frontboat/shortcutkit)）
 - `sign.py` —— 签名脚本，把 plist 变成可导入的 `.shortcut`
 
 ## 重新生成
+**必须用 `.venv/bin/python`**，系统 python3 里没装 shortcutkit：
+
 ```bash
-python3 shortcut/build_shortcut.py /tmp/main.plist
-python3 shortcut/sign.py /tmp/main.plist shortcut/排班闹钟.shortcut
+.venv/bin/python shortcut/build_shortcut.py /tmp/main.plist
+.venv/bin/python shortcut/sign.py /tmp/main.plist shortcut/排班闹钟.shortcut
 cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用这份
 ```
+
+缺依赖时先装（项目根目录）：
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt   # 含 shortcutkit>=3.2
+```
+
+## 为什么用 shortcutkit 生成
+它把 Shortcuts 引擎里的**动作目录**（449 个内置动作 + 1265 个 Apple 应用动作）
+做成了带类型校验的 Python API。写错参数名不是"生成一个坏文件"，而是当场抛
+`ValueError: ...: unknown parameter(s) ['label']`。
+
+之前手写 plist 时踩的坑它都能拦住：
+
+| 坑 | 后果 |
+| --- | --- |
+| `Add Alarm` 传了 `label`、`repeatSchedule` | 真机报「请为此操作中的每个参数选取值，然后终止了」 |
+| `repeats` 传 `"Never"` | 枚举里只有 sunday…saturday，传了就是非法值；不传才是"不重复" |
+| descriptor 的 `BundleIdentifier` 写成 `com.apple.mobiletimer` | 目录里三个闹钟动作都是 `com.apple.clock` |
+| 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
+
+**签名仍走 `playground.cherrilang.org`**：shortcutkit 的 `sign()` 是 `subprocess`
+调 macOS 的 `shortcuts sign` CLI，Linux 上跑不了；`sign.py` 改用远程签名服务，
+解出来的文件首字节是 `AEA1`，iOS 可以导入。
 
 ## 导入方式
 1. **页面按钮**：打开 <https://felix-ma.github.io/self-calendar/>，
@@ -92,6 +118,7 @@ iOS 26 导入这个 `.shortcut` 时，该动作会被**静默丢弃**，但后�
 - 就寝/睡眠闹钟不受快捷指令控制
 - `alarms.json` 必须已经推送，快捷指令才拿得到最新数据
 - 时钟里旧的「排班…」闹钟会在第一次运行时被关掉（不删），之后保持干净
-- 「添加闹钟」的三个参数缺一不可：`dateComponents`、`label`/`name`、`repeatSchedule`；
-  「查找闹钟」也必须带 `WFContentItemInputParameter`（时钟里的闹钟），
-  少一个真机就报「请为此操作中的每个参数选取值，然后终止了」
+- 「添加闹钟」真正可用的参数只有 `dateComponents`、`name`、`allowsSnooze`、`repeats`、`OpenWhenRun`
+  （**没有 `label`**，闹钟名就是 `name`；**不传 `repeats`** 才是不重复）
+- 「查找闹钟」必须带 `WFContentItemInputParameter`（值只能是 `Library`），
+  少了真机同样报「请为此操作中的每个参数选取值，然后终止了」

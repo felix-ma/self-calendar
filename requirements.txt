@@ -1,10 +1,14 @@
 # 排班日历 · Python 依赖
 #
-# paiban.py 本身只用 Python 标准库，运行主程序不需要任何第三方包。
-# 这里唯一的依赖供「从 ~/.dsh/.credentials.yaml 取 DEEPSEEK_API_KEY」的辅助命令使用
-# （见 AGENTS.md「凭据」一节）；不导出 Key 时 publish/update 会跳过识别，连它也不需要。
+# paiban.py 本身只用 Python 标准库，生成/同步/发布不需要任何第三方包。
+#
+# - PyYAML：供「从 ~/.dsh/.credentials.yaml 取 DEEPSEEK_API_KEY」的辅助命令使用
+#   （见 AGENTS.md「凭据」一节）；不导出 Key 时 publish/update 会跳过识别，连它也不需要。
+# - shortcutkit：供 shortcut/build_shortcut.py 生成 iOS 捷径的 plist
+#   （沙盒里用它的动作目录做参数校验，能当场发现写错的参数名）。
 #
 # 安装（项目内 venv，见 README「环境与依赖」）：
 #   python3 -m venv .venv
 #   .venv/bin/python -m pip install -r requirements.txt
 PyYAML>=6.0
+shortcutkit>=3.2
