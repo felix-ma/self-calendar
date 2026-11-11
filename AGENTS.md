@@ -73,10 +73,13 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   顶层另有 `next`（最近一条待建）和 `due`（仅当它在 24 小时内才有值，
   否则 null —— 闹钟只有「时:分」没日期，超 24 小时建会提前响）
 - iOS 快捷指令（`shortcut/`）：GET 线上 `alarms.json` 取 `due`，无值就通知「本次不建」；
-  有值则找 label 含「排班」的闹钟 —— 第一个用 `Update Alarm` **原地更新**时间和名字，
-  其余（历史遗留）关掉，一个都没有才 `Add Alarm` 新建。
-  **不要改回「关旧 + 建新」**：那样每天多一个已关闭的废闹钟，用久了满天垃圾。
-  也**不要用 Delete**：删除必须弹窗要用户确认，Update / Toggle 都不需要。已签名文件随仓库提交
+  有值则目标标签 = `due.label + 空格 + due.time`（如 `排班·早班 07:45`），
+  扫时钟里全部闹钟：同名的那一个打开、其余含「排班」的关掉、都没有才 `Add Alarm` 新建。
+  所以同一班次同时刻只维护一个闹钟，反复运行幂等。
+  **不要用 `Update Alarm`**：它是 iOS 27 才有的动作，iOS 26 导入时被静默丢弃，
+  会出现「什么都没发生也不报错」（真机踩过）；只用 `com.apple.mobiletimer-framework`
+  的 Find / Toggle / Add 三个动作。
+  **不要用 Delete**：删除必须弹窗要用户确认，Toggle 不需要。已签名文件随仓库提交
 - 页面按钮：`docs/paiban-alarm.shortcut` 是给下载按钮用的副本（直接下载，不再用
   `shortcuts://` 前缀）；每次重新签名后要
   `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`
