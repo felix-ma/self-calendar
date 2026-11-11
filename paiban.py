@@ -455,6 +455,11 @@ def build_ics(schedule: dict, path: Path, alarm=None, keep_all: bool = False) ->
 
 ALARM_LABEL = "排班"
 
+# 快捷指令（shortcut/build_shortcut.py）的逻辑版本，写进 alarms.json 的
+# shortcut_version 字段。改了 .shortcut 的动作/判断就 +1，两处要一起改：
+# 主快捷指令每天比对远端这个值，不一致就提示用户运行「排班闹钟·更新」。
+SHORTCUT_VERSION = 1
+
 
 def build_alarms(schedule: dict, path: Path, alarm=None,
                  keep_all: bool = False, days: int = 0) -> tuple[int, Path]:
@@ -508,6 +513,7 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
         "label_prefix": ALARM_LABEL,
         "window_days": days,
         "count": len(out),
+        "shortcut_version": str(SHORTCUT_VERSION),
         "next": next_alarm,
         "due": due,
         "alarms": out,

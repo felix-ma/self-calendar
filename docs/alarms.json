@@ -1,9 +1,10 @@
 {
-  "generated_at": "2026-11-11T09:29:35",
+  "generated_at": "2026-11-11T09:37:09",
   "timezone": "Asia/Shanghai",
   "label_prefix": "排班",
   "window_days": 0,
   "count": 5,
+  "shortcut_version": "1",
   "next": {
     "label": "排班·晚班",
     "at": "2026-11-11T14:45:00",

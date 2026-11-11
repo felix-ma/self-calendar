@@ -71,6 +71,7 @@
   </div>
 
   <a class="btn wide" id="alarm" href="paiban-alarm.shortcut" download>下载闹钟快捷指令</a>
+  <a class="btn wide ghost" id="alarm-update" href="paiban-alarm-update.shortcut" download>下载「排班闹钟·更新」</a>
 
   <div class="card">
     <div class="cal-head">
@@ -96,7 +97,8 @@
       <li>订阅会定期刷新，下载不会自动更新</li>
       <li>提醒时间按通勤算：5 km 内电动车、更远打车</li>
       <li>iPhone 注意：订阅/导入的 .ics 只有一个颜色，系统也不会采用事件里的提醒；要按班次分色 + 逐事件提醒，请用 iCloud 共享的「排班·早班 / 晚班 / 白班」三个日历</li>
-      <li>「下载闹钟快捷指令」得到 <code>paiban-alarm.shortcut</code>：iPhone 上用 Safari 下载后点开即可加入快捷指令 App。首次运行允许读取「日历」；建议设一个每天 00:05 的时间自动化并关掉「运行前询问」</li>
+      <li>「下载闹钟快捷指令」得到 <code>paiban-alarm.shortcut</code>：iPhone 上用 Safari 下载后点开即可加入快捷指令 App。它只联网、不需要日历权限；建议设一个每天 00:05 的时间自动化并关掉「运行前询问」</li>
+      <li>「排班闹钟·更新」是配套的一键更新指令：跑起来会打开系统的导入页，点「替换」就完成更新。只有快捷指令本身的逻辑变了才需要它 —— 班次、时间、提前量这些数据由 <code>alarms.json</code> 更新，不用重装</li>
     </ul>
   </details>
 

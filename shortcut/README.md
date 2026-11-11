@@ -1,16 +1,25 @@
 # 排班闹钟 · iOS 快捷指令
 
 ## 文件
-- `排班闹钟.shortcut` —— 已签名，可直接导入 iPhone
-- `build_shortcut.py` —— 生成器（XML plist），改了逻辑后重新生成
+- `排班闹钟.shortcut` —— 主指令，已签名，每天自动跑
+- `排班闹钟·更新.shortcut` —— 配套的一键更新指令（打开系统导入页，点「替换」）
+- `build_shortcut.py` —— 生成器，`main` / `updater` 两种
 - `sign.py` —— 签名脚本，把 plist 变成可导入的 `.shortcut`
 
 ## 重新生成
 ```bash
-python3 shortcut/build_shortcut.py /tmp/a.plist
-python3 shortcut/sign.py /tmp/a.plist shortcut/排班闹钟.shortcut
-cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用这份
+python3 shortcut/build_shortcut.py /tmp/main.plist main
+python3 shortcut/sign.py /tmp/main.plist shortcut/排班闹钟.shortcut
+cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut        # 页面按钮用这份
+
+python3 shortcut/build_shortcut.py /tmp/upd.plist updater
+python3 shortcut/sign.py /tmp/upd.plist "shortcut/排班闹钟·更新.shortcut"
+cp "shortcut/排班闹钟·更新.shortcut" docs/paiban-alarm-update.shortcut
 ```
+
+**改了主指令的动作或判断，就把 `build_shortcut.py` 的 `VERSION`
+和 `paiban.py` 的 `SHORTCUT_VERSION` 一起 +1**（两边必须一致），
+否则用户手机上不会收到更新提示。只改班次/时间/提前量则不用动版本。
 
 ## 导入方式
 1. **页面按钮**：打开 <https://felix-ma.github.io/self-calendar/>，
@@ -45,6 +54,9 @@ https://felix-ma.github.io/self-calendar/alarms.json
   否则会把明天的闹钟提前到今天响。**超过 24 小时的不建，留给明天的自动化**
 
 ## 它做什么
+0. 先比对 `alarms.json` 里的 `shortcut_version` 与自身内置版本；
+   不一致 → 弹一条通知「有新版本，方便时运行『排班闹钟·更新』」，
+   **不打开任何页面**（自动化时没人看着，打开只会卡住），随后照常继续跑
 1. 拉 `alarms.json`，取 `due`；为空 → 弹一条通知「没有需要新建的闹钟」，结束
 2. 目标标签 = `due.label` + 空格 + `due.time`，例如 **`排班·早班 07:45`**
 3. 取时钟里**所有**闹钟，逐个看 label，含「排班」的：
@@ -68,6 +80,19 @@ iOS 26 导入这个 `.shortcut` 时，该动作会被**静默丢弃**，但后�
 ## 为什么不用「删除」
 删除必须弹确认框让用户点；关闭（`Toggle`）不需要，静默生效。
 
+## 更新快捷指令
+iOS **不允许**快捷指令静默覆盖自己，所以「点一下替换」这步去不掉。
+能做的是把前面所有步骤（找下载地址、下载、点开文件）省掉：
+
+1. 运行「排班闹钟·更新」
+2. 系统弹出导入页，点「替换」
+
+主指令发现版本不一致时会提醒你去点；**自动化运行到这一步只弹提醒、跳过**，
+不会因为没人点而卡住或失败，闹钟照旧建。
+
+日常真正会变的只有班次数据（写在 `alarms.json` 里，我推一次就生效），
+那种情况**不需要**任何重装；只有快捷指令本身的逻辑改了才需要更新。
+
 ## 怎么用
 1. 导入快捷指令；它要联网，不需要日历权限
 2. 快捷指令 → 自动化 → 时间 → **每天 00:05** → 加动作「排班闹钟」
@@ -80,6 +105,7 @@ iOS 26 导入这个 `.shortcut` 时，该动作会被**静默丢弃**，但后�
 闹钟和日历提醒（VALARM）用同一个数，所以两者**同一时刻**响：都是「该出发了」。
 
 ## 注意
+- 别把主指令改名为别的，`排班闹钟·更新` 里的导入地址靠名字找
 - 就寝/睡眠闹钟不受快捷指令控制
 - `alarms.json` 必须已经推送，快捷指令才拿得到最新数据
 - 时钟里旧的「排班…」闹钟会在第一次运行时被关掉（不删），之后保持干净

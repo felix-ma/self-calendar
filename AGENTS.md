@@ -80,9 +80,16 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   会出现「什么都没发生也不报错」（真机踩过）；只用 `com.apple.mobiletimer-framework`
   的 Find / Toggle / Add 三个动作。
   **不要用 Delete**：删除必须弹窗要用户确认，Toggle 不需要。已签名文件随仓库提交
-- 页面按钮：`docs/paiban-alarm.shortcut` 是给下载按钮用的副本（直接下载，不再用
-  `shortcuts://` 前缀）；每次重新签名后要
-  `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut`
+- 版本检查：`alarms.json` 的 `shortcut_version` 与 `build_shortcut.py` 的 `VERSION` 比对，
+  不一致只弹通知、不自动开页面；`paiban.py` 的 `SHORTCUT_VERSION` 必须与之一致。
+  **改主指令逻辑时两处一起 +1**，否则用户收不到更新提示
+- 更新方式：`shortcut/排班闹钟·更新.shortcut` 只有一个 Open URLs 动作，
+  打开 `shortcuts://import-shortcut?url=…&name=排班闹钟`，用户点「替换」完成更新。
+  iOS 不允许快捷指令静默覆盖自己，这一步无法全自动；数据变化不需要重装
+- 页面按钮：`docs/paiban-alarm.shortcut` 与 `docs/paiban-alarm-update.shortcut` 是下载副本
+  （直接下载，不再用 `shortcuts://` 前缀）；每次重新签名后要
+  `cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut` 与
+  `cp "shortcut/排班闹钟·更新.shortcut" docs/paiban-alarm-update.shortcut`
 
 ## 提醒与通勤
 
