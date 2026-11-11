@@ -31,7 +31,15 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 ```
 
 它在每个关键节点往「日志」变量追加一行，末尾自动复制到剪贴板并显示出来，
-整段复制回来就能定位。日志内容：
+整段复制回来就能定位。
+
+**日志文本要自己拼接，不能用 `sk.text()` 转 `sk.text()`**：`sk.text()` 只认
+`WFTextTokenAttachment`，遇到已经是 `WFTextTokenString` 的参数会走 `str()`，
+打印出来是 `{'WFSerializationType': 'WFTextTokenString', ...}` 一长串
+（2026-11-11 真机日志就只看到这一行）。生成器里的 `log()` 因此自己合并
+`string` 与 `attachmentsByRange`，并按 UTF-16 偏移重新编号；测试里有断言盯着。
+
+日志内容：
 
 | 行 | 含义 |
 | --- | --- |

@@ -134,9 +134,35 @@ def build_main(debug=False):
     # 复制到剪贴板并显示出来，方便整段复制回帖。正常版一条都不插，
     # 免得真机每天跑都要多做几十个动作。
     def log(*parts):
+        """追加一行日志。parts 可以是字符串，也可以是 sk.ref()/sk.text()/sk.coerce() 的结果。
+
+        坑：sk.text() 只认 WFTextTokenAttachment，遇到已经是 WFTextTokenString 的
+        参数会走 str()，把整份字典原样印出来（2026-11-11 真机日志就只看到
+        "{'WFSerializationType': 'WFTextTokenString', ...}"）。所以这里自己拼：
+        遇到 token string 就把它的 string 和 attachmentsByRange 一起并进来，
+        并按 UTF-16 偏移重新编号。
+        """
         if not debug:
             return
-        s.action(A.APPENDVARIABLE, WFInput=sk.text(*parts), WFVariableName=LOGGER)
+        string = ""
+        attachments = {}
+        for part in parts:
+            if isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenString":
+                sub = part["Value"]
+                offset = len(string.encode("utf-16-le")) // 2
+                for rng, value in (sub.get("attachmentsByRange") or {}).items():
+                    start = int(rng.strip("{}").split(",")[0])
+                    attachments[f"{{{offset + start}, 1}}"] = value
+                string += sub.get("string", "")
+            elif isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenAttachment":
+                attachments[f"{{{len(string.encode('utf-16-le')) // 2}, 1}}"] = part["Value"]
+                string += "\ufffc"
+            else:
+                string += str(part)
+        s.action(A.APPENDVARIABLE,
+                 WFInput={"WFSerializationType": "WFTextTokenString",
+                          "Value": {"string": string, "attachmentsByRange": attachments}},
+                 WFVariableName=LOGGER)
 
     if debug:
         s.action(A.SETVARIABLE, WFInput=sk.text(""), WFVariableName=LOGGER)
@@ -210,7 +236,6 @@ def build_main(debug=False):
     # ── 3. 挑到了才继续 ────────────────────────────────────────────────────
     picked = s.if_(sk.coerce(sk.variable("已完成"), "WFStringContentItem"),
                    "is", "是")
-    log("   选中班次：")
 
     at2 = act(s, A.GETVALUEFORKEY, "响铃时刻", WFInput=sk.variable("目标"),
               WFGetDictionaryValueType="Value", WFDictionaryKey="at")
@@ -223,7 +248,7 @@ def build_main(debug=False):
     # 目标标签 = 「排班·早班 07:45」，既是闹钟名，也是「同一个闹钟」的判据
     s.action(A.SETVARIABLE, WFInput=sk.text(ref(named), " ", ref(hhmm)),
              WFVariableName="目标标签")
-    log(sk.text(ref(named)), " ", sk.text(ref(hhmm)),
+    log("   选中：", sk.text(ref(named)), " ", sk.text(ref(hhmm)),
         "（响铃 ", sk.text(sk.property_(ref(when2), "Time")), "）\n")
 
     # ── 4. 处理时钟里已有的排班闹钟 ────────────────────────────────────────
@@ -280,7 +305,9 @@ def build_main(debug=False):
              dateComponents=sk.text(sk.property_(ref(when2), "Time")),
              name=sk.text(sk.variable("目标标签")),
              allowsSnooze=True)
+    log("⑥ 已新建闹钟\n")
     s.end_if(missing)
+    log("⑧ 已有同名闹钟，未新建\n")
 
     log("⑤ 已存在？", sk.text(sk.variable("已存在")), "\n")
 

@@ -222,6 +222,58 @@ class GeneratedShortcut(unittest.TestCase):
                 "转成 AlarmEntity 后没有紧接着取 label")
 
 
+class Diagnostics(unittest.TestCase):
+    """诊断版（--debug）。日志本身也可能写成坏结构，这里一并测。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.actions = build_shortcut.build_main(debug=True).to_plist()["WFWorkflowActions"]
+
+    def test_normal_version_has_no_log_actions(self):
+        """正常版不插任何日志动作，免得每天跑多做几十步。"""
+        normal = build_shortcut.build_main().to_plist()["WFWorkflowActions"]
+        ids = [a["WFWorkflowActionIdentifier"] for a in normal]
+        self.assertNotIn("is.workflow.actions.appendvariable", ids)
+        self.assertNotIn("is.workflow.actions.showresult", ids)
+        self.assertNotIn("is.workflow.actions.setclipboard", ids)
+
+    def test_debug_logs_are_plain_text_tokens(self):
+        """日志文本必须是 WFTextTokenString，且不能把 dict 的 str() 印出来。
+
+        对应事故（2026-11-11）：把 sk.text() 的结果又塞给 sk.text()，
+        打印出来是 "{'WFSerializationType': 'WFTextTokenString', ...}" 一串。
+        """
+        logs = [a for a in self.actions
+                if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.appendvariable"]
+        self.assertGreater(len(logs), 5, "诊断版应该有若干条日志")
+        for action in logs:
+            payload = params(action)["WFInput"]
+            self.assertEqual(payload["WFSerializationType"], "WFTextTokenString")
+            self.assertNotIn("WFSerializationType", payload["Value"]["string"],
+                             "日志里出现了被 str() 的字典")
+
+    def test_debug_logs_end_with_output(self):
+        """日志末尾要复制到剪贴板并显示，用户才能整段贴回来。"""
+        ids = [a["WFWorkflowActionIdentifier"] for a in self.actions]
+        self.assertIn("is.workflow.actions.setclipboard", ids)
+        self.assertIn("is.workflow.actions.showresult", ids)
+        clip = ids.index("is.workflow.actions.setclipboard")
+        show = ids.index("is.workflow.actions.showresult")
+        self.assertLess(clip, show)
+
+    def test_debug_blocks_still_paired(self):
+        """插日志不能把 If / Repeat 的括号搞坏。"""
+        groups = {}
+        for action in self.actions:
+            p = params(action)
+            if "GroupingIdentifier" in p:
+                groups.setdefault(p["GroupingIdentifier"], []).append(
+                    p.get("WFControlFlowMode"))
+        for gid, modes in groups.items():
+            self.assertEqual(modes[0], 0)
+            self.assertEqual(modes[-1], 2)
+
+
 class SelectionLogic(unittest.TestCase):
     """「挑哪一条班次」的判断链，对应事故：明明有班次却挑不到。"""
 
