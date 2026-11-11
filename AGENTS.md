@@ -114,6 +114,21 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - **推送失败**：检查 SSH 部署密钥（`ssh -T git@github.com`）和远端 `origin`。
 - **时区**：事件按北京时间生成，`DTSTART` 带 `TZID=Asia/Shanghai`。
 
+## 测试
+
+```bash
+.venv/bin/python -m unittest discover -s shortcut -v   # 生成器回归测试
+```
+
+测的是 `shortcut/build_shortcut.py` 产出的 plist 结构：根键、块配对、
+引用名与输出名一致、`WFNumberValue` 必须是字符串、Add Alarm 不带
+`label`/`repeatSchedule`、descriptor 是 `com.apple.clock`、24 小时窗口
+两个数值条件、挑到就停手、没挑到只提示。
+
+**改生成器必须跑它**，每个用例的 docstring 写着它对应哪次真机事故。
+它拦不住 iOS 的运行时语义（条件在真机上算成真还是假、某动作在某版本
+会不会被静默丢弃），那些只能真机验证。
+
 ## 依赖
 
 - 主程序 `paiban.py` **只用 Python 标准库**（3.10+），系统 `python3` 直接跑即可；
