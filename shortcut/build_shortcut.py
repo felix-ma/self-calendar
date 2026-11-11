@@ -5,13 +5,16 @@
     python3 shortcut/build_shortcut.py /tmp/main.plist
 
 流程（不读日历、不读备注，直接请求线上 alarms.json）：
-  1. 拉 https://felix-ma.github.io/self-calendar/alarms.json
-  2. 取 due 字段：paiban.py 已经算好「下一次该生效的闹钟」
-     （今天的班次过了 / 今天没排班就自动落到明天；全都过了就是空）
-  3. due 为空 → 只提示一句，不建
-  4. due 有值 → 目标标签 = 「due.label + 空格 + due.time」，例如「排班·早班 07:45」
+  1. 拉 https://felix-ma.github.io/self-calendar/alarms.json，取 alarms[] 全清单
+  2. 用「当前时间」逐条比较，挑出第一条满足下面两条的：
+     · at 还没到（已过的班次跳过）
+     · 距现在不超过 24 小时（闹钟没有日期，超过一天会响错日子）
+     —— 这个选择必须在运行时做。alarms.json 是发布时的快照，
+        服务器先算好「今天该建哪个」会过期：晚上再跑就漏了当天的班次。
+  3. 一条都没挑到 → 只提示一句，不建
+  4. 挑到了 → 目标标签 = 「label + 空格 + time」，例如「排班·早班 07:45」
      · 时钟里已有同名闹钟 → 打开它，不新建
-     · 没有同名闹钟     → 把其它「排班」旧闹钟关掉，再按 due.at 新建一个
+     · 没有同名闹钟     → 把其它「排班」旧闹钟关掉，再按 at 新建一个
 
 为什么标签里带时间：
   只有「查找 / 开关 / 添加」三个动作可用，改不了闹钟时间，只能关旧建新。
@@ -137,16 +140,25 @@ TIME_AGG = {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}
 
 
 def build_main():
-    A_DL, A_DICT = U(), U()
-    A_DUE, A_AT, A_DATE, A_LABEL, A_HHMM, A_ALM = U(), U(), U(), U(), U(), U()
+    A_DL, A_DICT, A_ALL = U(), U(), U()
+    A_AT, A_DATE, A_GAP = U(), U(), U()
+    A_AT2, A_DATE2, A_LABEL, A_HHMM, A_ALM = U(), U(), U(), U(), U()
+    G_LOOP, G_TODO, G_POS, G_24 = U(), U(), U(), U()
     G_MAIN, G_ALM, G_IF, G_SAME, G_NEW = U(), U(), U(), U(), U()
 
     return [
         act("is.workflow.actions.comment", {"WFCommentActionText":
-            "每天自动跑：拉取线上排班闹钟清单（alarms.json），取 paiban.py 算好的 due，"
-            "在时钟里维护一个「排班·班次 时:分」的闹钟。\n\n"
-            "due 已经包含「今天班次过了就看明天、明天没排班就不建」的判断，"
-            "所以这里不做日期判断，只看 due 有没有值。\n\n"
+            "每天自动跑：拉取线上排班清单（alarms.json），用「当前时间」在 alarms[] 里"
+            "挑出下一条还没到、且距现在不超过 24 小时的班次，在时钟里维护一个"
+            "「排班·班次 时:分」的闹钟。\n\n"
+            "为什么在手机上算而不是让服务器算好：\n"
+            "  alarms.json 是发布时的快照，可能一大早就生成了，也可能好几天不更新。"
+            "服务器如果把「今天该建哪个」算死（以前的 due 字段），"
+            "到了晚上再看就过期了 —— 2026-11-11 真机踩过：今天有白班却不建闹钟。\n"
+            "  所以清单只描述「有哪些班次」，选哪一条完全由运行时的当前时间决定。\n\n"
+            "为什么只取 24 小时内：\n"
+            "  iOS 闹钟只有「时:分」没有日期，设 07:45 就是下一个 07:45 响。"
+            "目标超过 24 小时还建，会把后天的闹钟提前到明天响。\n\n"
             "同名闹钟已存在就直接打开它，不重复新建，所以时钟里不会越攒越多；"
             "确实换班次/换时间时才关旧的、建一个新的。\n\n"
             "只用 iOS 26 就有的三个动作：查找闹钟 / 开关闹钟 / 添加闹钟。\n"
@@ -166,20 +178,31 @@ def build_main():
             {"WFInput": attach(out(A_DL, "清单"))},
             name="清单字典", uid=A_DICT),
 
-        # 2. 取 due（下一次该生效的闹钟；没有就是空）
+        # 2. 取全部班次列表
         act("is.workflow.actions.getvalueforkey",
             {"WFInput": attach(out(A_DICT, "清单字典")),
              "WFGetDictionaryValueType": "Value",
-             "WFDictionaryKey": "due"},
-            name="下次闹钟", uid=A_DUE),
+             "WFDictionaryKey": "alarms"},
+            name="全部班次", uid=A_ALL),
 
-        if_block(G_MAIN, 0,
-                 WFInput=cond_input(out(A_DUE, "下次闹钟")),
-                 WFCondition=101),                           # has any value
+        # 3. 选中标志：字符串比较最稳，别用「变量是否有值」那种模糊判断
+        act("is.workflow.actions.setvariable",
+            {"WFInput": text("否"), "WFVariableName": "已完成"}),
 
-        # 3. due.at → 日期
+        # 4. 逐条比较，挑第一条符合条件的
+        act("is.workflow.actions.repeat.each",
+            {"GroupingIdentifier": G_LOOP, "WFControlFlowMode": 0,
+             "WFInput": attach(out(A_ALL, "全部班次"))}),
+
+        # 4a. 已经选中了就跳过剩下的
+        if_block(G_TODO, 0,
+                 WFInput=cond_input(ref("已完成")),
+                 WFCondition=4,                             # is
+                 WFConditionalActionString="否"),
+
+        # 4b. 这一条的响铃时刻
         act("is.workflow.actions.getvalueforkey",
-            {"WFInput": attach(out(A_DUE, "下次闹钟")),
+            {"WFInput": attach(ref("Repeat Item")),
              "WFGetDictionaryValueType": "Value",
              "WFDictionaryKey": "at"},
             name="开始时刻", uid=A_AT),
@@ -188,28 +211,74 @@ def build_main():
             {"WFInput": attach(out(A_AT, "开始时刻"))},
             name="日期", uid=A_DATE),
 
-        # 4. due.label → 班次名（形如「排班·早班」）
+        # 4c. 距现在还有多少秒（Total Time 单位就是秒）
+        act("is.workflow.actions.gettimebetweendates",
+            {"WFInput": token([out(A_DATE, "日期")]),
+             "WFTimeUntilFromDate": token([{"Type": "CurrentDate"}]),
+             "WFTimeUntilUnit": "Total Time"},
+            name="还有多少秒", uid=A_GAP),
+
+        # 4d. 已经过了的不算
+        if_block(G_POS, 0,
+                 WFInput=cond_input(out(A_GAP, "还有多少秒")),
+                 WFCondition=2,                             # is greater than
+                 WFNumberValue="0"),
+
+        # 4e. 只用 24 小时内的（闹钟没日期，超过一天会响错日子）
+        if_block(G_24, 0,
+                 WFInput=cond_input(out(A_GAP, "还有多少秒")),
+                 WFCondition=1,                             # is less than or equal to
+                 WFNumberValue="86400"),
+
+        act("is.workflow.actions.setvariable",
+            {"WFInput": attach(ref("Repeat Item")), "WFVariableName": "目标"}),
+
+        act("is.workflow.actions.setvariable",
+            {"WFInput": text("是"), "WFVariableName": "已完成"}),
+
+        if_block(G_24, 2),
+        if_block(G_POS, 2),
+        if_block(G_TODO, 2),
+        act("is.workflow.actions.repeat.each",
+            {"GroupingIdentifier": G_LOOP, "WFControlFlowMode": 2}),
+
+        # 5. 挑到了才继续
+        if_block(G_MAIN, 0,
+                 WFInput=cond_input(ref("已完成")),
+                 WFCondition=4,
+                 WFConditionalActionString="是"),
+
+        # 5a. 目标 → 日期
         act("is.workflow.actions.getvalueforkey",
-            {"WFInput": attach(out(A_DUE, "下次闹钟")),
+            {"WFInput": attach(ref("目标")),
+             "WFGetDictionaryValueType": "Value",
+             "WFDictionaryKey": "at"},
+            name="响铃时刻", uid=A_AT2),
+
+        act("is.workflow.actions.detect.date",
+            {"WFInput": attach(out(A_AT2, "响铃时刻"))},
+            name="响铃日期", uid=A_DATE2),
+
+        # 5b. 目标 → 班次名（形如「排班·早班」）
+        act("is.workflow.actions.getvalueforkey",
+            {"WFInput": attach(ref("目标")),
              "WFGetDictionaryValueType": "Value",
              "WFDictionaryKey": "label"},
             name="闹钟名", uid=A_LABEL),
 
-        # 5. due.time → 「14:45」，用来拼标签，也是"同一个闹钟"的判据
-        #    直接用清单里的 time 字段，不自己格式化日期，省一处格式歧义
+        # 5c. 目标 → 「07:45」，用来拼标签，也是"同一个闹钟"的判据
         act("is.workflow.actions.getvalueforkey",
-            {"WFInput": attach(out(A_DUE, "下次闹钟")),
+            {"WFInput": attach(ref("目标")),
              "WFGetDictionaryValueType": "Value",
              "WFDictionaryKey": "time"},
             name="时刻", uid=A_HHMM),
 
-        # 6. 目标标签 = 「排班·早班 07:45」
+        # 5d. 目标标签 = 「排班·早班 07:45」
         act("is.workflow.actions.setvariable",
             {"WFInput": attach(token([out(A_LABEL, "闹钟名"), " ", out(A_HHMM, "时刻")])),
              "WFVariableName": "目标标签"}),
 
-        # 7. 取时钟里所有闹钟（不靠过滤条件：真机上 label 过滤不可靠，
-        #    改在循环里逐个判断，既不会漏也不会误伤）
+        # 6. 取时钟里的排班闹钟
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTGetAlarmsIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="AlarmEntity"),
              "ShowWhenRun": False,
@@ -233,22 +302,22 @@ def build_main():
              }},
             name="闹钟", uid=A_ALM),
 
-        # 8. 记下「已经找到目标闹钟」，循环结束后据此决定要不要新建
+        # 7. 记下「已经找到目标闹钟」，循环结束后据此决定要不要新建
         act("is.workflow.actions.setvariable",
             {"WFInput": text("否"), "WFVariableName": "已存在"}),
 
-        # 9. 逐个看
+        # 8. 逐个看
         act("is.workflow.actions.repeat.each",
             {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 0,
              "WFInput": attach(out(A_ALM, "闹钟"))}),
 
-        # 10. 只看名字含「排班」的，别人的闹钟一律不碰
+        # 9. 只看名字含「排班」的，别人的闹钟一律不碰
         if_block(G_IF, 0,
                  WFInput=cond_input(ref("Repeat Item", ALARM_LABEL_AGGS)),
                  WFCondition=99,                             # contains
                  WFConditionalActionString=LABEL),
 
-        # 11. 名字正好是目标标签 → 就是它
+        # 10. 名字正好是目标标签 → 就是它
         if_block(G_SAME, 0,
                  WFInput=cond_input(ref("Repeat Item", ALARM_LABEL_AGGS)),
                  WFCondition=4,                             # is
@@ -257,7 +326,7 @@ def build_main():
         act("is.workflow.actions.setvariable",
             {"WFInput": text("是"), "WFVariableName": "已存在"}),
 
-        # 12. 同名闹钟：确保它是开着的（可能是之前关掉的）
+        # 11. 同名闹钟：确保它是开着的（可能是之前关掉的）
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTToggleAlarmIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="ToggleAlarmIntent"),
              # 只需要一层 WFTextTokenAttachment，多包一层 iOS 就认不出实体，会弹窗
@@ -268,7 +337,7 @@ def build_main():
 
         if_block(G_SAME, 1),
 
-        # 13. 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
+        # 12. 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTToggleAlarmIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="ToggleAlarmIntent"),
              "alarm": attach(ref("Repeat Item")),
@@ -281,7 +350,7 @@ def build_main():
         act("is.workflow.actions.repeat.each",
             {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 2}),
 
-        # 14. 没有同名闹钟才新建
+        # 13. 没有同名闹钟才新建
         if_block(G_NEW, 0,
                  WFInput=cond_input(ref("已存在")),
                  WFCondition=4,
@@ -291,7 +360,7 @@ def build_main():
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="CreateAlarmIntent"),
              "ShowWhenRun": False,
              # 取日期的 .Time 属性：闹钟只要「时:分」
-             "dateComponents": token([out(A_DATE, "日期", [TIME_AGG])]),
+             "dateComponents": token([out(A_DATE2, "响铃日期", [TIME_AGG])]),
              "label": token([ref("目标标签")]),
              "name": token([ref("目标标签")]),
              # 不重复。这套写法在用户真机上建出过闹钟，别改。
@@ -300,12 +369,12 @@ def build_main():
 
         if_block(G_NEW, 2),
 
-        # 15. 没有 due：提示一句，不建闹钟
+        # 14. 没挑到：提示一句，不建闹钟
         if_block(G_MAIN, 1),
         act("is.workflow.actions.notification",
             {"WFNotificationActionTitle": "排班闹钟",
              "WFNotificationActionBody":
-                 "今天和之后的排班都没有需要新建的闹钟，本次不建。"}),
+                 "24 小时内没有要建的排班闹钟，本次不建。"}),
         if_block(G_MAIN, 2),
     ]
 

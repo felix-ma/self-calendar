@@ -1,31 +1,9 @@
 {
-  "generated_at": "2026-11-11T22:55:01",
+  "generated_at": "2026-11-11T23:07:47",
   "timezone": "Asia/Shanghai",
   "label_prefix": "排班",
   "window_days": 0,
   "count": 4,
-  "next": {
-    "label": "排班·白班",
-    "at": "2026-11-12T07:35:00",
-    "start": "2026-11-12T08:00:00",
-    "time": "07:35",
-    "start_time": "08:00",
-    "date": "2026-11-12",
-    "shift": "白班",
-    "commute": "骑电动车",
-    "lead": 25
-  },
-  "due": {
-    "label": "排班·白班",
-    "at": "2026-11-12T07:35:00",
-    "start": "2026-11-12T08:00:00",
-    "time": "07:35",
-    "start_time": "08:00",
-    "date": "2026-11-12",
-    "shift": "白班",
-    "commute": "骑电动车",
-    "lead": 25
-  },
   "alarms": [
     {
       "label": "排班·白班",

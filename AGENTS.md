@@ -70,10 +70,12 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - 共享给别人时三个日历要**分别共享**；共享后 `VALARM` 会一起带过去，提醒不会退化
 - `docs/alarms.json`：全部未结束班次的闹钟清单（`at`/`time`/`start`/`shift`/`label`/`commute`/`lead`），
   `--alarm-days N` 可只看未来 N 天，默认 0 = 不截断。
-  顶层另有 `next`（最近一条待建）和 `due`（仅当它在 24 小时内才有值，
-  否则 null —— 闹钟只有「时:分」没日期，超 24 小时建会提前响）
-- iOS 快捷指令（`shortcut/`）：GET 线上 `alarms.json` 取 `due`，无值就通知「本次不建」；
-  有值则目标标签 = `due.label + 空格 + due.time`（如 `排班·早班 07:45`），
+  **只有 `alarms[]` 全清单，没有 `due`/`next`**：这份文件是发布时的快照，可能几天不更新，
+  服务器预先算好「下一次该建哪个」会过期（晚上再跑就漏了当天班次，真机踩过）。
+  「挑哪一条」必须由快捷指令在运行时用当前时间决定，别把它搬回 Python
+- iOS 快捷指令（`shortcut/`）：GET 线上 `alarms.json` 取 `alarms[]`，遍历并用
+  「获取日期之间的时间」筛出 `at` 未到、且 ≤24 小时（86400 秒）的第一条；一条都没有就通知「本次不建」；
+  挑到则目标标签 = `label + 空格 + time`（如 `排班·早班 07:45`），
   扫时钟里全部闹钟：同名的那一个打开、其余含「排班」的关掉、都没有才 `Add Alarm` 新建。
   所以同一班次同时刻只维护一个闹钟，反复运行幂等。
   **不要用 `Update Alarm`**：它是 iOS 27 才有的动作，iOS 26 导入时被静默丢弃，

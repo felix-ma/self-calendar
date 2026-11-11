@@ -467,7 +467,9 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
       start       班次开始时间
       start_time  同上，只取 HH:MM
       lead/notify 通勤预留分钟
-    快捷指令流程：删掉 label 含「排班」的旧闹钟 -> 按 at 新建。
+    快捷指令流程：客户端按「当前时间」从 alarms[] 里挑第一条还没到、
+    且在 24 小时内的，再按 at 建闹钟。这里不做「今天/明天」的判断：
+    JSON 是发布时的快照，放久了就会过期，判断必须交给运行时的快捷指令。
     """
     events, _ = collect_events(schedule, keep_all)
     now = datetime.now(TZOFF)
@@ -493,23 +495,14 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
             "lead": minutes,
         })
     out.sort(key=lambda x: x["at"])
-    # iOS 的闹钟只有「时:分」，没有日期：设 07:45 就是在下一个 07:45 响。
-    # 所以只有当目标时刻距现在不超过 24 小时才建，否则会把明天的闹钟
-    # 提前到今天响。超过 24 小时的留给明天的自动化再建。
-    next_alarm = out[0] if out else None
-    due = None
-    if next_alarm:
-        gap = (datetime.fromisoformat(next_alarm["at"]).replace(tzinfo=TZOFF) - now).total_seconds()
-        if 0 < gap <= 24 * 3600:
-            due = next_alarm
+    # 只给清单，不给「下一次该建哪个」：那是运行时的事。
+    # 快捷指令用「当前时间」在 alarms[] 里挑，所以这份文件放多久都不会过期。
     data = {
         "generated_at": datetime.now(TZOFF).strftime("%Y-%m-%dT%H:%M:%S"),
         "timezone": TZID,
         "label_prefix": ALARM_LABEL,
         "window_days": days,
         "count": len(out),
-        "next": next_alarm,
-        "due": due,
         "alarms": out,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
