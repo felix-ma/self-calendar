@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
-"""生成「排班闹钟」快捷指令（.plist → 交给 playground 签名）。
+"""生成「排班闹钟」快捷指令（XML plist → 交给 playground 签名）。
 
 用法：
-    python3 shortcut/build_shortcut.py /tmp/main.plist main      # 主指令（每天自动跑）
-    python3 shortcut/build_shortcut.py /tmp/upd.plist updater    # 「排班闹钟·更新」
+    python3 shortcut/build_shortcut.py /tmp/main.plist
 
-主指令流程（不读日历、不读备注，直接请求线上 alarms.json）：
+流程（不读日历、不读备注，直接请求线上 alarms.json）：
   1. 拉 https://felix-ma.github.io/self-calendar/alarms.json
-  2. 比对 shortcut_version 与自身内置版本 —— 不一致就弹一条通知
-     「有新版本，去运行『排班闹钟·更新』」，**不自动打开任何页面**
-     （自动化跑的时候人不在，打开页面只会卡住；跳过即可，不影响建闹钟）
-  3. 取 due 字段：paiban.py 已经算好「下一次该生效的闹钟」
+  2. 取 due 字段：paiban.py 已经算好「下一次该生效的闹钟」
      （今天的班次过了 / 今天没排班就自动落到明天；全都过了就是空）
-  4. due 为空 → 只提示一句，不建
-  5. due 有值 → 目标标签 = 「due.label + 空格 + due.time」，例如「排班·早班 07:45」
-     · 时钟里已有同名闹钟 → 打开它（顺便把其它「排班」闹钟关掉），不新建
-     · 没有同名闹钟     → 把所有「排班」旧闹钟关掉，再按 due.at 新建一个
-
-「排班闹钟·更新」只有一个动作：打开
-`shortcuts://import-shortcut?url=…&name=排班闹钟`，弹出系统的导入页，
-点「替换」就完成更新。iOS 不允许快捷指令静默覆盖自己，所以这一步必须人手点。
+  3. due 为空 → 只提示一句，不建
+  4. due 有值 → 目标标签 = 「due.label + 空格 + due.time」，例如「排班·早班 07:45」
+     · 时钟里已有同名闹钟 → 打开它，不新建
+     · 没有同名闹钟     → 把其它「排班」旧闹钟关掉，再按 due.at 新建一个
 
 为什么标签里带时间：
-  只有「查找 / 开关 / 添加」三个动作可用（见下），改不了闹钟时间，
-  只能关旧建新。把时间编进标签后，同一班次同一时刻的闹钟只会存在一个。
+  只有「查找 / 开关 / 添加」三个动作可用，改不了闹钟时间，只能关旧建新。
+  把时间编进标签后，同一班次同一时刻的闹钟只会存在一个，不会越攒越多。
 
 为什么不用 Update Alarm（原地改时间）：
   它是 iOS 27 才有的动作。iOS 26 导入时该动作会被静默丢弃，
@@ -31,27 +23,26 @@
 
 为什么不用 Delete：
   删除必须弹确认框要用户点；关闭（Toggle）不需要，静默生效。
+
+参数写法的硬要求（照着真实样本抄，别自己发挥）：
+  · MTToggleAlarmIntent / MTCreateAlarmIntent / MTGetAlarmsIntent 都是 AppIntent，
+    只认 AppIntentDescriptor + 该动作真实存在的参数；多传参数会报
+    「请为此操作中的每个参数选取值，然后终止了」。
+  · Toggle 必须带 alarm + operation("turn") + state(0/1)；少了 operation 会报参数没选值。
+  · 从闹钟实体里读 label，必须先转成 AlarmEntity 再取属性，两层 aggrandizement：
+    先 WFCoercionVariableAggrandizement(WFLinkEntityContentItem_com.apple.clock_AlarmEntity)，
+    再 WFPropertyVariableAggrandizement(label)。少第一层，条件里读到的是空值。
 """
-import plistlib, sys, uuid
+import plistlib
+import sys
+import uuid
 from pathlib import Path
-from urllib.parse import quote
 
 ALARMS_URL = "https://felix-ma.github.io/self-calendar/alarms.json"
-SHORTCUT_URL = "https://felix-ma.github.io/self-calendar/paiban-alarm.shortcut"
-
 SHORTCUT_NAME = "排班闹钟"
-UPDATER_NAME = "排班闹钟·更新"
-
-# 自身逻辑版本，必须与 paiban.py 的 SHORTCUT_VERSION 一致。
-# 改了下面的动作/判断就 +1（两处一起改），主指令会据此提示用户更新。
-VERSION = "1"
 
 LABEL = "排班"            # 闹钟标签识别关键字
 ALARM_PREFIX = "排班·"     # 新建闹钟的标签前缀
-
-# 「排班闹钟·更新」里打开的地址：系统导入页，自带「替换」按钮
-IMPORT_URL = ("shortcuts://import-shortcut?url=" + quote(SHORTCUT_URL, safe="")
-              + "&name=" + quote(SHORTCUT_NAME, safe=""))
 
 
 def U() -> str:
@@ -95,7 +86,7 @@ def token(parts):
 
 
 def text(s):
-    """纯文本参数（setvariable / openurl 这类不吃裸字符串）。"""
+    """纯文本参数（setvariable 这类不吃裸字符串）。"""
     return attach(token([s]))
 
 
@@ -128,27 +119,32 @@ CLOCK = {"ActionRequiresAppInstallation": True,
          "BundleIdentifier": "com.apple.mobiletimer",
          "Name": "Clock", "TeamIdentifier": "0000000000"}
 
-# 从闹钟实体里取 label 的属性访问器
-ALARM_LABEL_AGG = {"PropertyName": "label",
-                   "PropertyUserInfo": {
-                       "WFLinkEntityContentPropertyUserInfoPropertyIdentifier": "label"},
-                   "Type": "WFPropertyVariableAggrandizement"}
+# 闹钟实体 → 可读取的属性。两层：先转成 AlarmEntity，再取 label。
+ALARM_ENTITY_COERCION = {
+    "CoercionItemClass": "WFLinkEntityContentItem_com.apple.clock_AlarmEntity",
+    "Type": "WFCoercionVariableAggrandizement",
+}
+ALARM_LABEL_PROP = {
+    "PropertyName": "label",
+    "PropertyUserInfo": {
+        "WFLinkEntityContentPropertyUserInfoPropertyIdentifier": "label"},
+    "Type": "WFPropertyVariableAggrandizement",
+}
+# 读「循环项这个闹钟的 label」用的完整访问链
+ALARM_LABEL_AGGS = [ALARM_ENTITY_COERCION, ALARM_LABEL_PROP]
 
 TIME_AGG = {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}
 
 
 def build_main():
-    A_DL, A_DICT, A_VER = U(), U(), U()
+    A_DL, A_DICT = U(), U()
     A_DUE, A_AT, A_DATE, A_LABEL, A_HHMM, A_ALM = U(), U(), U(), U(), U(), U()
-    G_VER, G_MAIN, G_ALM, G_IF, G_SAME, G_NEW = U(), U(), U(), U(), U(), U()
+    G_MAIN, G_ALM, G_IF, G_SAME, G_NEW = U(), U(), U(), U(), U()
 
     return [
         act("is.workflow.actions.comment", {"WFCommentActionText":
             "每天自动跑：拉取线上排班闹钟清单（alarms.json），取 paiban.py 算好的 due，"
             "在时钟里维护一个「排班·班次 时:分」的闹钟。\n\n"
-            "开始处会比对 shortcut_version：线上版本和本指令内置版本不一致时，"
-            "只弹一条通知提醒去运行「排班闹钟·更新」，不自动打开页面"
-            "（自动化多半没人看着，打开页面只会卡住）。\n\n"
             "due 已经包含「今天班次过了就看明天、明天没排班就不建」的判断，"
             "所以这里不做日期判断，只看 due 有没有值。\n\n"
             "同名闹钟已存在就直接打开它，不重复新建，所以时钟里不会越攒越多；"
@@ -170,25 +166,7 @@ def build_main():
             {"WFInput": attach(out(A_DL, "清单"))},
             name="清单字典", uid=A_DICT),
 
-        # 2. 版本检查：不一致只提醒，不打开页面
-        act("is.workflow.actions.getvalueforkey",
-            {"WFInput": attach(out(A_DICT, "清单字典")),
-             "WFGetDictionaryValueType": "Value",
-             "WFDictionaryKey": "shortcut_version"},
-            name="远端版本", uid=A_VER),
-
-        if_block(G_VER, 0,
-                 WFInput=cond_input(out(A_VER, "远端版本")),
-                 WFCondition=5,                              # is not
-                 WFConditionalActionString=VERSION),
-        act("is.workflow.actions.notification",
-            {"WFNotificationActionTitle": "排班闹钟有新版本",
-             "WFNotificationActionBody":
-                 "快捷指令逻辑更新了。方便时运行「排班闹钟·更新」，点一下「替换」即可；"
-                 "本次仍按旧逻辑继续跑，不影响建闹钟。"}),
-        if_block(G_VER, 2),
-
-        # 3. 取 due（下一次该生效的闹钟；没有就是空）
+        # 2. 取 due（下一次该生效的闹钟；没有就是空）
         act("is.workflow.actions.getvalueforkey",
             {"WFInput": attach(out(A_DICT, "清单字典")),
              "WFGetDictionaryValueType": "Value",
@@ -199,7 +177,7 @@ def build_main():
                  WFInput=cond_input(out(A_DUE, "下次闹钟")),
                  WFCondition=101),                           # has any value
 
-        # 4. due.at → 日期
+        # 3. due.at → 日期
         act("is.workflow.actions.getvalueforkey",
             {"WFInput": attach(out(A_DUE, "下次闹钟")),
              "WFGetDictionaryValueType": "Value",
@@ -210,14 +188,14 @@ def build_main():
             {"WFInput": attach(out(A_AT, "开始时刻"))},
             name="日期", uid=A_DATE),
 
-        # 5. due.label → 班次名（形如「排班·早班」）
+        # 4. due.label → 班次名（形如「排班·早班」）
         act("is.workflow.actions.getvalueforkey",
             {"WFInput": attach(out(A_DUE, "下次闹钟")),
              "WFGetDictionaryValueType": "Value",
              "WFDictionaryKey": "label"},
             name="闹钟名", uid=A_LABEL),
 
-        # 6. due.time → 「14:45」，用来拼标签，也是"同一个闹钟"的判据
+        # 5. due.time → 「14:45」，用来拼标签，也是"同一个闹钟"的判据
         #    直接用清单里的 time 字段，不自己格式化日期，省一处格式歧义
         act("is.workflow.actions.getvalueforkey",
             {"WFInput": attach(out(A_DUE, "下次闹钟")),
@@ -225,44 +203,61 @@ def build_main():
              "WFDictionaryKey": "time"},
             name="时刻", uid=A_HHMM),
 
-        # 7. 目标标签 = 「排班·早班 07:45」
+        # 6. 目标标签 = 「排班·早班 07:45」
         act("is.workflow.actions.setvariable",
             {"WFInput": attach(token([out(A_LABEL, "闹钟名"), " ", out(A_HHMM, "时刻")])),
              "WFVariableName": "目标标签"}),
 
-        # 8. 取时钟里所有闹钟（不靠过滤条件：真机上 label 过滤不可靠，
+        # 7. 取时钟里所有闹钟（不靠过滤条件：真机上 label 过滤不可靠，
         #    改在循环里逐个判断，既不会漏也不会误伤）
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTGetAlarmsIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="AlarmEntity"),
              "ShowWhenRun": False,
-             "WFContentItemInputParameter": "Library"},
+             # 两个都必填，缺一个真机就报「请为此操作中的每个参数选取值，然后终止了」：
+             #  · WFContentItemInputParameter = 从哪儿找（时钟里的闹钟）
+             #  · WFContentItemFilter         = 筛选条件（名字含「排班」）
+             # filter 里的 Property 必须小写 'label'；Operator 99 = 包含。
+             "WFContentItemInputParameter": "Library",
+             "WFContentItemFilter": {
+                 "Value": {
+                     "WFActionParameterFilterPrefix": 1,
+                     "WFActionParameterFilterTemplates": [{
+                         "Operator": 99,
+                         "Property": "label",
+                         "Removable": True,
+                         "Values": {"String": LABEL, "Unit": 4},
+                     }],
+                     "WFContentPredicateBoundedDate": False,
+                 },
+                 "WFSerializationType": "WFContentPredicateTableTemplate",
+             }},
             name="闹钟", uid=A_ALM),
 
-        # 9. 记下「已经找到目标闹钟」，循环结束后据此决定要不要新建
+        # 8. 记下「已经找到目标闹钟」，循环结束后据此决定要不要新建
         act("is.workflow.actions.setvariable",
             {"WFInput": text("否"), "WFVariableName": "已存在"}),
 
-        # 10. 逐个看
+        # 9. 逐个看
         act("is.workflow.actions.repeat.each",
             {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 0,
              "WFInput": attach(out(A_ALM, "闹钟"))}),
 
-        # 11. 只看名字含「排班」的，别人的闹钟一律不碰
+        # 10. 只看名字含「排班」的，别人的闹钟一律不碰
         if_block(G_IF, 0,
-                 WFInput=cond_input(ref("Repeat Item", [ALARM_LABEL_AGG])),
+                 WFInput=cond_input(ref("Repeat Item", ALARM_LABEL_AGGS)),
                  WFCondition=99,                             # contains
                  WFConditionalActionString=LABEL),
 
-        # 12. 名字正好是目标标签 → 就是它
+        # 11. 名字正好是目标标签 → 就是它
         if_block(G_SAME, 0,
-                 WFInput=cond_input(ref("Repeat Item", [ALARM_LABEL_AGG])),
+                 WFInput=cond_input(ref("Repeat Item", ALARM_LABEL_AGGS)),
                  WFCondition=4,                             # is
                  WFConditionalActionString=token([ref("目标标签")])),
 
         act("is.workflow.actions.setvariable",
             {"WFInput": text("是"), "WFVariableName": "已存在"}),
 
-        # 13. 同名闹钟：确保它是开着的（可能是之前关掉的）
+        # 12. 同名闹钟：确保它是开着的（可能是之前关掉的）
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTToggleAlarmIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="ToggleAlarmIntent"),
              # 只需要一层 WFTextTokenAttachment，多包一层 iOS 就认不出实体，会弹窗
@@ -273,7 +268,7 @@ def build_main():
 
         if_block(G_SAME, 1),
 
-        # 14. 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
+        # 13. 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
         act("com.apple.mobiletimer-framework.MobileTimerIntents.MTToggleAlarmIntent",
             {"AppIntentDescriptor": dict(CLOCK, AppIntentIdentifier="ToggleAlarmIntent"),
              "alarm": attach(ref("Repeat Item")),
@@ -286,7 +281,7 @@ def build_main():
         act("is.workflow.actions.repeat.each",
             {"GroupingIdentifier": G_ALM, "WFControlFlowMode": 2}),
 
-        # 15. 没有同名闹钟才新建
+        # 14. 没有同名闹钟才新建
         if_block(G_NEW, 0,
                  WFInput=cond_input(ref("已存在")),
                  WFCondition=4,
@@ -299,37 +294,19 @@ def build_main():
              "dateComponents": token([out(A_DATE, "日期", [TIME_AGG])]),
              "label": token([ref("目标标签")]),
              "name": token([ref("目标标签")]),
+             # 不重复。这套写法在用户真机上建出过闹钟，别改。
              "repeatSchedule": {"displayString": "Never", "value": 0},
              "allowsSnooze": True}),
 
         if_block(G_NEW, 2),
 
-        # 16. 没有 due：提示一句，不建闹钟
+        # 15. 没有 due：提示一句，不建闹钟
         if_block(G_MAIN, 1),
         act("is.workflow.actions.notification",
             {"WFNotificationActionTitle": "排班闹钟",
              "WFNotificationActionBody":
                  "今天和之后的排班都没有需要新建的闹钟，本次不建。"}),
         if_block(G_MAIN, 2),
-    ]
-
-
-def build_updater():
-    """只做一件事：打开系统导入页，让用户点「替换」。
-
-    iOS 不允许快捷指令静默覆盖自身，所以「点一下」这步去不掉；
-    但把下载、找文件、点开这些步骤全省了，相当于一键更新。
-    """
-    return [
-        act("is.workflow.actions.comment", {"WFCommentActionText":
-            "排班闹钟·更新\n\n"
-            "只有一步：打开系统的快捷指令导入页，点「替换」即完成更新。\n"
-            "数据（班次、时间、提前量）平时由 alarms.json 更新，不需要运行这个；\n"
-            "只有我改了快捷指令本身的逻辑时才需要点一次。\n\n"
-            "iOS 不允许快捷指令静默覆盖自己，所以这一步必须人手点，无法全自动。"
-        }),
-        act("is.workflow.actions.openurl",
-            {"WFInput": text(IMPORT_URL)}),
     ]
 
 
@@ -352,10 +329,6 @@ def wrap(actions, name):
 
 if __name__ == "__main__":
     dst = Path(sys.argv[1] if len(sys.argv) > 1 else "排班闹钟.plist")
-    kind = (sys.argv[2] if len(sys.argv) > 2 else "main").lower()
-    if kind == "updater":
-        data = wrap(build_updater(), UPDATER_NAME)
-    else:
-        data = wrap(build_main(), SHORTCUT_NAME)
+    data = wrap(build_main(), SHORTCUT_NAME)
     dst.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_XML))
-    print(f"已生成 {dst}（{kind}，{len(data['WFWorkflowActions'])} 个动作）")
+    print(f"已生成 {dst}（{len(data['WFWorkflowActions'])} 个动作）")
