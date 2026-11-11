@@ -33,6 +33,15 @@ cp shortcut/排班闹钟.shortcut docs/paiban-alarm.shortcut   # 页面按钮用
 | `repeats` 传 `"Never"` | 枚举里只有 sunday…saturday，传了就是非法值；不传才是"不重复" |
 | descriptor 的 `BundleIdentifier` 写成 `com.apple.mobiletimer` | 目录里三个闹钟动作都是 `com.apple.clock` |
 | 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
+| `WFNumberValue` 写成整数 | 数字比较永远为假（见下） |
+
+**`WFNumberValue` 必须是字符串。** shortcutkit 的 `if_()` 把数值比较的值
+写成 Python 整数，plist 里是 `<integer>`；而 iOS 真实存的都是字符串
+（真机样本 `"2"`、vergenzt 参考实现 `'0'`）。写成整数时 iOS 26 的条件
+配不上，全判为假 —— 2026-11-11 真机踩过：明明明天有班次，
+「还有多少秒 > 0」和「<= 86400」全失败，一条都挑不到。
+所以生成器里用自定义的 `num_if()`：先按整数喂给 shortcutkit 过校验，
+再把它落盘的参数改成字符串。
 
 **签名仍走 `playground.cherrilang.org`**：shortcutkit 的 `sign()` 是 `subprocess`
 调 macOS 的 `shortcuts sign` CLI，Linux 上跑不了；`sign.py` 改用远程签名服务，

@@ -46,6 +46,7 @@ shortcutkit 目录查出来、之前手写 plist 写错的几处（别再改回�
 """
 import plistlib
 import sys
+import uuid
 from pathlib import Path
 
 import shortcutkit as sk
@@ -83,6 +84,26 @@ def ref(action):
     """引用某个动作的输出，输出名跟着 CustomOutputName 走。"""
     params = action.get("WFWorkflowActionParameters", {})
     return sk.ref(action, params.get("CustomOutputName"))
+
+
+def num_if(s, subject, condition, number):
+    """开一个「数字比较」的 If 块，返回 gid。
+
+    为什么不用 shortcutkit 的 if_()：它把数值比较的值写成 Python 整数
+    （`WFNumberValue` 存成 plist 的 <integer>），而 iOS 真实存的都是**字符串**
+    （真机样本里是 `"2"`，vergenzt 的参考实现也写 `'0'`）。写成整数时 iOS 26
+    的条件配不上，永远判为假 —— 2026-11-11 真机踩过：明明明天有班次，
+    「还有多少秒 > 0」和「<= 86400」全失败，于是一条都挑不到。
+    """
+    gid = str(uuid.uuid4()).upper()
+    # 先按整数喂进去过 shortcutkit 的校验，再把落盘的参数改成字符串。
+    action = s.action("is.workflow.actions.conditional",
+                      GroupingIdentifier=gid, WFControlFlowMode=0,
+                      WFInput=sk.subject(subject),
+                      WFCondition=sk.CONDITION[condition],
+                      WFNumberValue=number)
+    action["WFWorkflowActionParameters"]["WFNumberValue"] = str(number)
+    return gid
 
 
 def alarm_label(attachment):
@@ -148,8 +169,8 @@ def build_main():
               WFTimeUntilFromDate=sk.text(sk.current_date()),
               WFTimeUntilUnit="Total Time")   # Total Time 的单位就是秒
 
-    future = s.if_(ref(gap), "greater_than", 0)             # 已经过了的不算
-    soon = s.if_(ref(gap), "less_or_equal", DAY_SECONDS)    # 只用 24 小时内的
+    future = num_if(s, ref(gap), "greater_than", 0)             # 已经过了的不算
+    soon = num_if(s, ref(gap), "less_or_equal", DAY_SECONDS)    # 只用 24 小时内的
 
     s.action(A.SETVARIABLE, WFInput=sk.repeat_item(), WFVariableName="目标")
     s.action(A.SETVARIABLE, WFInput=sk.text("是"), WFVariableName="已完成")
