@@ -128,26 +128,32 @@ class GeneratedShortcut(unittest.TestCase):
                 self.assertIsInstance(p["WFAnotherNumber"], str)
         self.assertGreaterEqual(found, 2, "24 小时窗口的两个数值条件不见了")
 
-    def test_add_alarm_has_no_phantom_params(self):
-        """Add Alarm 只能传它真有的参数。
+    def test_add_alarm_carries_the_three_extra_params(self):
+        """Add Alarm 要带上目录里没有的 label / repeatSchedule / ShowWhenRun。
 
-        对应事故：「请为此操作中的每个参数选取值，然后终止了」——
-        以前多传了 label 和 repeatSchedule，两者都不在参数表里。
+        对应两次真机事故：
+        - 「请为此操作中的每个参数选取值，然后终止了」：当时传了 appintents
+          参数表里没有的 label / repeatSchedule。但那条报错真正的原因是
+          dateComponents 直接塞动作输出（见 test_alarm_time_comes_from_the_variable）。
+        - 「名字没有传入具体名称」「创建时间还是需要用户手动选择」：
+          少传 label / repeatSchedule / ShowWhenRun 时，iOS 26 建出来的闹钟
+          没名字，还会停在编辑弹窗要人手动选时间。2026-11-11 确实建出过闹钟的
+          老版本就是带着这三个参数的，所以补回来。
         """
         adds = [a for a in self.actions
                 if a["WFWorkflowActionIdentifier"] == A.CLOCK_ADD_ALARM]
         self.assertEqual(len(adds), 1, "应该正好有一个「添加闹钟」")
         p = params(adds[0])
-        allowed = {"AppIntentDescriptor", "CustomOutputName", "GroupingIdentifier",
-                   "OpenWhenRun", "UUID", "WFControlFlowMode", "allowsSnooze",
-                   "dateComponents", "name", "repeats"}
-        self.assertEqual(set(p) - allowed, set())
-        for phantom in ("label", "repeatSchedule"):
-            self.assertNotIn(phantom, p, f"{phantom} 不是 Add Alarm 的参数")
-        # 不传 repeats 才是不重复（枚举里只有 sunday..saturday）
-        self.assertNotIn("repeats", p)
         self.assertIn("dateComponents", p)
         self.assertIn("name", p)
+        # 时钟 App 认 label；和 name 指向同一个标签
+        self.assertIn("label", p)
+        self.assertEqual(p["label"], p["name"], "label 和 name 应该是同一个标签")
+        self.assertEqual(p["repeatSchedule"], {"displayString": "Never", "value": 0},
+                         "repeatSchedule 必须显式写 Never，否则 iOS 会问重复方式")
+        self.assertIs(p.get("ShowWhenRun"), False)
+        # 不传 repeats 才是不重复（枚举里只有 sunday..saturday）
+        self.assertNotIn("repeats", p)
 
     def test_clock_descriptors(self):
         """三个闹钟动作的 descriptor 用真机验证过的那份，别跟着目录走。

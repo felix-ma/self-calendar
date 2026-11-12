@@ -66,7 +66,7 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 
 | 坑 | 后果 |
 | --- | --- |
-| `Add Alarm` 传了 `label`、`repeatSchedule` | 真机报「请为此操作中的每个参数选取值，然后终止了」 |
+| `Add Alarm` 少传 `label`、`repeatSchedule`、`ShowWhenRun` | 建出来的闹钟没名字，还会停在编辑弹窗要人手动选时间 |
 | `repeats` 传 `"Never"` | 枚举里只有 sunday…saturday，传了就是非法值；不传才是"不重复" |
 | 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
 | `WFNumberValue` 写成整数 | 数字比较永远为假（见下） |
@@ -217,7 +217,11 @@ iOS 26 导入这个 `.shortcut` 时，该动作会被**静默丢弃**，但后�
 - 就寝/睡眠闹钟不受快捷指令控制
 - `alarms.json` 必须已经推送，快捷指令才拿得到最新数据
 - 时钟里旧的「排班…」闹钟会在第一次运行时被关掉（不删），之后保持干净
-- 「添加闹钟」真正可用的参数只有 `dateComponents`、`name`、`allowsSnooze`、`repeats`、`OpenWhenRun`
-  （**没有 `label`**，闹钟名就是 `name`；**不传 `repeats`** 才是不重复）
+- 「添加闹钟」除了参数表里的 `dateComponents`、`name`、`allowsSnooze`、`repeats`、
+  `OpenWhenRun`，还必须带上 **`label`、`repeatSchedule`、`ShowWhenRun`** 这三个 ——
+  它们不在 shortcutkit 的目录里，所以 `add_alarm()` 生成后直接写进参数字典。
+  少了它们的后果是真机反馈的那两句：「名字没有传入具体名称」
+  「创建时间还是需要用户手动选择」。`label` 和 `name` 填同一个标签；
+  `repeatSchedule` 固定 `{displayString: "Never", value: 0}`；**不传 `repeats`** 才是不重复
 - 「查找闹钟」必须带 `WFContentItemInputParameter`（值只能是 `Library`），
   少了真机同样报「请为此操作中的每个参数选取值，然后终止了」

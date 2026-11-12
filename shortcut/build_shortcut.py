@@ -122,11 +122,21 @@ def toggle(s, alarm, on):
 def add_alarm(s, date_components, name):
     """建一个不重复的闹钟。
 
-    不传 repeats 就是「不重复」：枚举里只有 sunday..saturday，没有「永不」。
-    也没有 label / repeatSchedule 这两个参数 —— 多传会报「请为参数选取值」。
+    shortcutkit 的动作目录只登记了五种参数，但真机能用的那份
+    （2026-11-11 在用户手机上确实建出过闹钟的老版本）还带
+    `label`、`repeatSchedule`、`ShowWhenRun`。少传这三个，iOS 26 建出来的
+    闹钟**没有名字**，而且会停在「时间/重复」的编辑弹窗上要人手动选
+    （2026-11-12 真机反馈：「名字没有传入具体名称」「创建时间还是需要手动选择」）。
+
+    目录没有这三个键，走 s.action() 会被参数校验拦下，所以生成后直接写进
+    参数字典 —— 和 num_if() 改 WFNumberValue 同一个套路。
     """
     action = s.action(A.CLOCK_ADD_ALARM, dateComponents=date_components,
                       name=name, allowsSnooze=True)
+    params = action["WFWorkflowActionParameters"]
+    params["label"] = name      # 和 name 一样：时钟 App 认 label 这个名字
+    params["repeatSchedule"] = {"displayString": "Never", "value": 0}
+    params["ShowWhenRun"] = False
     return _override_descriptor(action, "CreateAlarmIntent")
 
 # 新建闹钟时，日期必须先落进这个变量再用它的 .Time（见第 4 段的说明）。

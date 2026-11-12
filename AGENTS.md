@@ -152,8 +152,9 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 ```
 
 测的是 `shortcut/build_shortcut.py` 产出的 plist 结构：根键、块配对、
-引用名与输出名一致、`WFNumberValue` 必须是字符串、Add Alarm 不带
-`label`/`repeatSchedule`、descriptor 用 `com.apple.mobiletimer`、24 小时窗口
+引用名与输出名一致、`WFNumberValue` 必须是字符串、Add Alarm **必须带**
+`label`/`repeatSchedule`/`ShowWhenRun`（少一个闹钟就没名字、还会弹编辑框要人选手动时间）、
+descriptor 用 `com.apple.mobiletimer`、24 小时窗口
 两个数值条件、Find Alarms 不带过滤、找到同名用 `A.EXIT` 收工、全程不用变量。
 
 **改生成器必须跑它**，每个用例的 docstring 写着它对应哪次真机事故。
