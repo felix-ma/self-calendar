@@ -71,6 +71,8 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 | descriptor 的 `BundleIdentifier` 写成 `com.apple.mobiletimer` | 目录里三个闹钟动作都是 `com.apple.clock` |
 | 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
 | `WFNumberValue` 写成整数 | 数字比较永远为假（见下） |
+| 读实体属性的 aggrandizement 漏了 `PropertyUserInfo` | 把属性名当字面量输出（断点里显示成英文单词 `label`），条件恒假 |
+| `sk.where()` 生成文本过滤行（缺 `Values.Unit`） | 过滤被静默忽略，筛出全部闹钟 |
 
 **`WFNumberValue` 必须是字符串。** shortcutkit 的 `if_()` 把数值比较的值
 写成 Python 整数，plist 里是 `<integer>`；而 iOS 真实存的都是字符串
@@ -79,6 +81,21 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 「还有多少秒 > 0」和「<= 86400」全失败，一条都挑不到。
 所以生成器里用自定义的 `num_if()`：先按整数喂给 shortcutkit 过校验，
 再把它落盘的参数改成字符串。
+
+**读闹钟的 `label` 要带 `PropertyUserInfo`。** 先把循环项转成
+`WFLinkEntityContentItem_com.apple.clock_AlarmEntity`，再取 `label` 属性，
+那一层 `WFPropertyVariableAggrandizement` 必须写上
+`PropertyUserInfo: {WFLinkEntityContentPropertyUserInfoPropertyIdentifier: "label"}`。
+少了它 iOS 不认识这是"实体属性"，直接把 `label` 这个字面量当值吐出来 ——
+2026-11-12 真机断点里就显示成英文单词 `label`，于是"含「排班」"恒为假，
+每个闹钟都走了"旧的、关掉"分支。测试 `test_alarm_label_reads_entity_property` 会拦。
+
+**按 `label` 筛闹钟的过滤行要带 `Values.Unit: 4`。** `sk.where()` 给文本行只写
+`Values: {String: ...}`，iOS 的闹钟文本过滤还要一个 `Unit: 4`（vergenzt 参考实现
+里就是 `Values: {String: '🗓️', Unit: 4}`）。少了它整个过滤被静默忽略 ——
+真机断点里"带排班过滤 8 个 / 不带过滤 8 个"两个数一模一样，于是把自己该新建的
+闹钟也当成"同名已存在"，一个都不建。所以生成器改用自写的 `label_filter()`，
+测试 `test_label_filter_has_unit` 会拦。
 
 **签名仍走 `playground.cherrilang.org`**：shortcutkit 的 `sign()` 是 `subprocess`
 调 macOS 的 `shortcuts sign` CLI，Linux 上跑不了；`sign.py` 改用远程签名服务，

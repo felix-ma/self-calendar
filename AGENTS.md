@@ -83,6 +83,11 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   导致循环体整段被跳过、一条班次都挑不到，而且完全不报错。
   只拿**动作输出**当引用（动作输出跨块可读）。需要「记住」一个值时，
   用 `Get Text` 之类的动作产出，再用 `sk.ref(那个动作)` 引用。
+  **读闹钟 `label` 必须带 `PropertyUserInfo`**（`WFPropertyVariableAggrandizement`
+  里写 `WFLinkEntityContentPropertyUserInfoPropertyIdentifier: "label"`）；
+  少了它 iOS 把属性名当字面量输出，断点里显示成英文单词 `label`，条件恒假。
+  **按 `label` 筛闹钟必须用 `label_filter()`**，文本行的 `Values` 要带 `Unit: 4`；
+  `sk.where()` 生成的行缺它，过滤被静默忽略（真机表现为「带过滤 N 个 = 不带过滤 N 个」）。
   **不要用 `Update Alarm`**：它是 iOS 27 才有的动作，iOS 26 导入时被静默丢弃，
   会出现「什么都没发生也不报错」（真机踩过）；只用 `com.apple.mobiletimer-framework`
   的 Find / Toggle / Add 三个动作。

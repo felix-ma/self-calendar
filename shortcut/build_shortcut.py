@@ -121,8 +121,31 @@ def alarm_label(attachment):
                       "Aggrandizements": [
                           {"Type": "WFCoercionVariableAggrandizement",
                            "CoercionItemClass": ALARM_ENTITY_CLASS},
+                          # PropertyUserInfo 不能省：少了它 iOS 不认识这是「实体属性」，
+                          # 直接把属性名字面量 "label" 当成值输出 —— 2026-11-12 真机
+                          # 断点里就显示成英文单词 label，导致「含排班」条件恒不成立。
                           {"Type": "WFPropertyVariableAggrandizement",
-                           "PropertyName": "label"}]}}
+                           "PropertyName": "label",
+                           "PropertyUserInfo": {
+                               "WFLinkEntityContentPropertyUserInfoPropertyIdentifier":
+                                   "label"}}]}}
+
+
+def label_filter(operator, value):
+    """手工拼「按 label 筛闹钟」的过滤条件。
+
+    不用 sk.where()：它给文本行只写 `Values: {String: ...}`，而 iOS 的闹钟文本
+    过滤还要一个 `Unit: 4`（参考实现 vergenzt/shortcuts 里就是这么写的）。少了
+    它过滤被静默忽略 —— 2026-11-12 真机断点里「带排班过滤 8 个 / 不带过滤 8 个」
+    两个数一样，就是这个原因。
+    """
+    return {"WFSerializationType": "WFContentPredicateTableTemplate",
+            "Value": {"WFActionParameterFilterPrefix": 1,
+                      "WFContentPredicateBoundedDate": False,
+                      "WFActionParameterFilterTemplates": [
+                          {"Property": "label", "Operator": operator,
+                           "Removable": True,
+                           "Values": {"String": value, "Unit": 4}}]}}
 
 
 def build_main(debug=False):
@@ -251,7 +274,7 @@ def build_main(debug=False):
     # ── 3. 这个班次的闹钟：同名打开、其余「排班」关掉 ──────────────────────
     alarms = act(s, A.CLOCK_FIND_ALARMS, "闹钟",
                  WFContentItemInputParameter="Library",
-                 WFContentItemFilter=sk.where(("label", "contains", LABEL)))
+                 WFContentItemFilter=label_filter(99, LABEL))
 
     if debug:
         count_alarm = act(s, A.COUNT, "闹钟条数", Input=ref(alarms),
@@ -288,7 +311,7 @@ def build_main(debug=False):
     # ── 4. 时钟里没有同名闹钟才新建 ────────────────────────────────────────
     existing = act(s, A.CLOCK_FIND_ALARMS, "同名闹钟",
                    WFContentItemInputParameter="Library",
-                   WFContentItemFilter=sk.where(("label", "is", sk.text(ref(target)))))
+                   WFContentItemFilter=label_filter(4, sk.text(ref(target))))
     found = act(s, A.COUNT, "同名闹钟条数", Input=ref(existing), WFCountType="Items")
 
     missing = num_if(s, ref(found), "less_or_equal", 0)

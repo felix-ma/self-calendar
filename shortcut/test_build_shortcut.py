@@ -238,9 +238,33 @@ class GeneratedShortcut(unittest.TestCase):
                    for a in aggs)]
         self.assertTrue(entity_chains, "没有任何一处把循环项转成 AlarmEntity")
         for aggs in entity_chains:
-            self.assertTrue(
-                any(a.get("PropertyName") == "label" for a in aggs),
-                "转成 AlarmEntity 后没有紧接着取 label")
+            props = [a for a in aggs if a.get("PropertyName") == "label"]
+            self.assertTrue(props, "转成 AlarmEntity 后没有紧接着取 label")
+            # 事故（2026-11-12）：漏掉 PropertyUserInfo 时 iOS 不认识这是实体属性，
+            # 直接把 "label" 这个字面量当值输出，断点里显示成英文单词 label，
+            # 于是「含排班」条件恒假、每个闹钟都被当成旧的关掉。
+            for prop in props:
+                self.assertEqual(
+                    prop.get("PropertyUserInfo", {}).get(
+                        "WFLinkEntityContentPropertyUserInfoPropertyIdentifier"),
+                    "label",
+                    "WFPropertyVariableAggrandizement 必须带 PropertyUserInfo")
+
+    def test_label_filter_has_unit(self):
+        """按 label 筛闹钟的文本行必须带 Unit: 4。
+
+        事故（2026-11-12）：sk.where() 只写 Values.String，缺 Unit，iOS 静默忽略
+        整个过滤条件 —— 真机断点里「带排班过滤 8 个 / 不带过滤 8 个」两个数一样，
+        结果把它自己建的闹钟也当成「同名已存在」，一个都不新建。
+        """
+        finds = [a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
+        self.assertTrue(finds)
+        for find in finds:
+            row = params(find)["WFContentItemFilter"]["Value"][
+                "WFActionParameterFilterTemplates"][0]
+            self.assertEqual(row["Values"].get("Unit"), 4,
+                             "文本过滤行的 Values 必须有 Unit: 4")
 
 
 class Diagnostics(unittest.TestCase):
