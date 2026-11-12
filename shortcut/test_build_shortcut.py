@@ -216,10 +216,8 @@ class GeneratedShortcut(unittest.TestCase):
                  if a["WFWorkflowActionIdentifier"] == A.EXIT]), 2,
             "找到同名、以及新建成功后，都要用「停止这个快捷指令」收工，"
             "不能靠变量记状态，也不能接着处理后面的班次")
-        conds = [a for a in self.actions
-                 if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.conditional"]
-        operators = [params(c).get("WFCondition") for c in conds]
-        self.assertIn(99, operators, "要用 contains 判断「是不是排班闹钟」")
+        # 判断「是不是排班闹钟」「是不是同名」全靠 text.match + count + 数字比较，
+        # 见 test_no_variable_in_condition_values。这里只确认收工动作在。
 
     def test_no_variable_in_condition_values(self):
         """「如果」的比较值里不能放变量，否则 iOS 15.4 上参数显示成红色。
@@ -232,8 +230,13 @@ class GeneratedShortcut(unittest.TestCase):
         for action in self.actions:
             if action["WFWorkflowActionIdentifier"] != "is.workflow.actions.conditional":
                 continue
-            value = params(action).get("WFConditionalActionString")
-            self.assertNotIsInstance(value, dict, "「如果」的比较值放了变量，15.4 会红")
+            p = params(action)
+            # 15.4 连「输入是实体属性变量」都标红，所以「如果」里一律不做文本比较：
+            # 比较值不能是变量，也不能用 contains/is 这类文本条件。
+            self.assertNotIsInstance(p.get("WFConditionalActionString"), dict,
+                                     "「如果」的比较值放了变量，15.4 会红")
+            self.assertNotIn(p.get("WFCondition"), (4, 99),
+                             "15.4 上「如果 是 / 包含」会标红，改成匹配文本+数条数")
         # 判断「有没有同名」现在靠 text.match + count + 数字比较
         self.assertGreaterEqual(
             len([a for a in self.actions

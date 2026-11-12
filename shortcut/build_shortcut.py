@@ -416,8 +416,18 @@ def build_main(debug=False):
     # 关旧只能用 label 属性判断（15.4 上这条判断不生效，最坏结果是旧闹钟没被关，
     # 但不会再重复建 —— 因为「要不要建」已经由上面的文本判断决定了）。
     each_alarm = s.repeat_each(ref(alarms))
-    stale = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
-    stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
+    # 这里也不能写「如果 <闹钟 label> 包含 排班」：比较值是固定字符串没错，但**输入**
+    # 是实体属性变量，15.4 的「如果」一样标红（2026-11-12 真机：「如果重复项目 包含
+    # 排班」是红的）。统一走「转文本 → 匹配文本 → 数条数 → 条数 > 0」。
+    stale_text = act(s, A.DETECT_TEXT, "旧闹钟标签", WFInput=alarm_label(sk.repeat_item()))
+    stale_hits = act(s, A.TEXT_MATCH, "旧闹钟命中",
+                     text=sk.text(ref(stale_text)),
+                     WFMatchTextPattern=sk.text(LABEL),
+                     WFMatchTextCaseSensitive=False)
+    stale_count = act(s, A.COUNT, "旧闹钟命中条数", Input=ref(stale_hits),
+                      WFCountType="Items")
+    stale = num_if(s, ref(stale_count), "greater_than", 0)
+    stop("旧闹钟：将关掉它", sk.text(ref(stale_text)))
     toggle(s, sk.repeat_item(), False)
     s.end_if(stale)
     s.end_repeat_each(each_alarm)
