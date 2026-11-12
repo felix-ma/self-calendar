@@ -93,9 +93,13 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   `WFDateFormat: HH:mm`）拍出 `"07:45"` 文本，直接交给 `dateComponents`；
   闹钟只认时刻，不需要整串日期。`test_no_variables_at_all` 与
   `test_alarm_time_is_formatted_hhmm_text` 守着这条线。
-  **读闹钟 `label` 必须带 `PropertyUserInfo`**（`WFPropertyVariableAggrandizement`
-  里写 `WFLinkEntityContentPropertyUserInfoPropertyIdentifier: "label"`）；
-  少了它 iOS 把属性名当字面量输出，断点里显示成英文单词 `label`，条件恒假。
+  **读闹钟名字用「整项转文本」，不要用实体 `label` 属性**（2026-11-12 真机
+  四种读法对照：直接转文本 → 有名字；强制文本类型 → 有名字；实体 `label` 属性
+  → 读不出来，iOS 26 与 15.4 都一样；实体 `dateComponents` → 有时刻）。
+  名字走 `alarm_name()`（原样返回循环项），时刻走 `alarm_time()`（两层
+  aggrandizement 取 `dateComponents`，再交给「格式化日期」只留时间）。
+  整份 plist 里不该出现取 `label` 的实体属性，
+  `test_alarm_name_uses_plain_text_not_entity_property` 会拦。
   **Find Alarms 不要传 `WFContentItemFilter`**：iOS 26 上它被完全忽略
   （2026-11-12 真机反复验证，带过滤 8 个、不带过滤还是 8 个；补 `Values.Unit: 4`、
   换 `AlarmEntity` descriptor 都没用）。只给 `WFContentItemInputParameter: "Library"`

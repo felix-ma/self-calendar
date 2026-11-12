@@ -243,51 +243,35 @@ class GeneratedShortcut(unittest.TestCase):
                  if a["WFWorkflowActionIdentifier"] == A.TEXT_MATCH]), 2,
             "命中数判断要用「匹配文本」，不能靠「如果 包含 <变量>」")
 
-    def test_alarm_label_reads_entity_property(self):
-        """读闹钟 label 要两层 aggrandizement，少第一层读到空值。"""
-        attachments = []
+    def test_alarm_name_uses_plain_text_not_entity_property(self):
+        """读闹钟名字只能用「整项转文本」，不能用实体 label 属性。
 
-        def walk(node):
-            if isinstance(node, dict):
-                for value in node.values():
-                    walk(value)
-            elif isinstance(node, list):
-                for value in node:
-                    walk(value)
-
-        for action in self.actions:
-            walk(params(action))
-        # 直接在 plist 里找那个组合
-        def find_coercions(node, out):
+        2026-11-12 真机对照（iOS 26 与 15.4 一致）：
+          重复项目直接转文本        → 有名字
+          强制转成文本类型再转文本    → 有名字
+          实体 → label 属性          → **读不出来**
+          实体 → dateComponents      → 有时刻
+        所以主指令整份都不该出现「转成 AlarmEntity 再取 label」这种链路，
+        出现就说明又退化回去了。
+        """
+        def find_aggs(node, out):
             if isinstance(node, dict):
                 aggs = node.get("Aggrandizements")
                 if isinstance(aggs, list):
                     out.append(aggs)
                 for value in node.values():
-                    find_coercions(value, out)
+                    find_aggs(value, out)
             elif isinstance(node, list):
                 for value in node:
-                    find_coercions(value, out)
+                    find_aggs(value, out)
 
-        coercions = []
-        find_coercions(self.actions, coercions)
-        entity_chains = [
-            aggs for aggs in coercions
-            if any(a.get("CoercionItemClass") == build_shortcut.ALARM_ENTITY_CLASS
-                   for a in aggs)]
-        self.assertTrue(entity_chains, "没有任何一处把循环项转成 AlarmEntity")
-        for aggs in entity_chains:
-            props = [a for a in aggs if a.get("PropertyName") == "label"]
-            self.assertTrue(props, "转成 AlarmEntity 后没有紧接着取 label")
-            # 事故（2026-11-12）：漏掉 PropertyUserInfo 时 iOS 不认识这是实体属性，
-            # 直接把 "label" 这个字面量当值输出，断点里显示成英文单词 label，
-            # 于是「含排班」条件恒假、每个闹钟都被当成旧的关掉。
-            for prop in props:
-                self.assertEqual(
-                    prop.get("PropertyUserInfo", {}).get(
-                        "WFLinkEntityContentPropertyUserInfoPropertyIdentifier"),
-                    "label",
-                    "WFPropertyVariableAggrandizement 必须带 PropertyUserInfo")
+        found = []
+        find_aggs(self.actions, found)
+        for aggs in found:
+            props = [a.get("PropertyName") for a in aggs
+                     if a.get("Type") == "WFPropertyVariableAggrandizement"]
+            self.assertNotIn("label", props,
+                             "实体 label 属性读不出来，名字要用「转文本」")
 
 class Diagnostics(unittest.TestCase):
     """诊断版（--debug）。日志本身也可能写成坏结构，这里一并测。"""

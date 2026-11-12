@@ -55,7 +55,13 @@ shortcutkit 目录查出来、之前手写 plist 写错的几处（别再改回�
     AlarmEntity / ToggleAlarmIntent；Find Alarms 还必须用 find_alarms() 覆盖，
     否则 WFContentItemFilter 会被静默忽略。
   · Toggle 必须带 alarm + operation("turn") + state(0/1)。
-  · 从闹钟实体读 label 要两层 aggrandizement：先转成 AlarmEntity，再取 label 属性。
+  · 读闹钟要按真机实测的四种读法挑（2026-11-12，iOS 26 与 15.4 结果一致）：
+      循环项直接转文本      → 有名字   ← alarm_name() 用这个
+      强制转成文本类型再转文本 → 有名字
+      实体 → label 属性      → **读不出来**（别再用）
+      实体 → dateComponents  → 有时刻   ← alarm_time() 用这个
+    所以「名字」整项转文本即可，「时刻」才需要先转 AlarmEntity 再取
+    dateComponents（两层 aggrandizement，且必须带 PropertyUserInfo）。
 """
 import plistlib
 import sys
@@ -186,12 +192,19 @@ def num_if(s, subject, condition, number):
     return gid
 
 
-def alarm_label(attachment):
-    """把「循环项这个闹钟」读成它的 label。
+def alarm_time(attachment):
+    """把「循环项这个闹钟」读成它的时刻（DateComponents 属性）。
 
-    必须先声明成 AlarmEntity 再取属性，少第一层条件里读到的是空值。shortcutkit 的
-    coerce() 只收内置内容类型（List 里没有这个实体类），所以这里手工拼那层
-    aggrandizement —— 只是往 sk.property_() 的结果前面插一项，其余照旧。
+    **不要用「转成文本」的方式取时间。** 2026-11-12 真机对照过四种读法：
+      重复项目直接转文本          → 只有名字
+      强制转成文本类型再转文本      → 只有名字
+      实体 → label 属性            → iOS 26 读不出（15.4 上同样为空）
+      实体 → dateComponents 属性   → **能读出时间**
+    所以时间只能走「先声明成 AlarmEntity，再取 dateComponents 属性」这条路。
+    shortcutkit 的 coerce() 不收这个实体类，aggrandizement 只能手工拼。
+
+    读出来的是 DateComponents，交给「格式化日期」时要把日期样式设成「无」，
+    只保留时间（见 alarm_hhmm()）。
     """
     value = attachment["Value"]
     return {"WFSerializationType": "WFTextTokenAttachment",
@@ -199,14 +212,20 @@ def alarm_label(attachment):
                       "Aggrandizements": [
                           {"Type": "WFCoercionVariableAggrandizement",
                            "CoercionItemClass": ALARM_ENTITY_CLASS},
-                          # PropertyUserInfo 不能省：少了它 iOS 不认识这是「实体属性」，
-                          # 直接把属性名字面量 "label" 当成值输出 —— 2026-11-12 真机
-                          # 断点里就显示成英文单词 label，导致「含排班」条件恒不成立。
                           {"Type": "WFPropertyVariableAggrandizement",
-                           "PropertyName": "label",
+                           "PropertyName": "dateComponents",
                            "PropertyUserInfo": {
                                "WFLinkEntityContentPropertyUserInfoPropertyIdentifier":
-                                   "label"}}]}}
+                                   "dateComponents"}}]}}
+
+
+def alarm_name(attachment):
+    """把「循环项这个闹钟」读成它的名字。
+
+    直接用「转成文本」，不要走实体属性：`label` 属性在 iOS 26 与 15.4 上都读不出，
+    而整项转文本拿到的就是名字（2026-11-12 真机对照确认）。
+    """
+    return attachment
 
 
 def find_alarms(s, name):
@@ -379,6 +398,7 @@ def build_main(debug=False):
         stop("时钟里的全部闹钟（转成文本）",
              "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(alarm_text)))
 
+
     # 「有没有同名」用「文本里找得到目标标签」判断。注意**不要把变量放进「如果」的
     # 比较值里**：2026-11-12 在 iOS 15.4 真机上，「如果 是」「如果 包含」的比较值
     # 直接显示成红色缺参数（15.4 的「如果」只接受固定值）。所以先用「匹配文本」
@@ -391,17 +411,23 @@ def build_main(debug=False):
     found = num_if(s, ref(hit_count), "greater_than", 0)
 
     # 已经有同名闹钟 → 确保它是开着的就行（可能是自己手动关掉的），然后收工。
-    # 这里同样不用「如果 label 是 <变量>」，改成「标签文本里匹配 ^目标标签$」再数条数。
+    # 判据是「名字对得上」**并且**「时刻对得上」：名字里已经编了时间
+    # （排班·早班 07:45），但仍拿实体上的真实时刻复核一次 —— 这样手改过的
+    # 闹钟也能被认出来，不会当成「没有」再建一个。
+    # 两条都用「匹配文本 → 数条数 → 条数 > 0」，因为 15.4 的「如果」不能做文本比较。
     each_same = s.repeat_each(ref(alarms))
-    label_text = act(s, A.DETECT_TEXT, "标签文本",
-                     WFInput=alarm_label(sk.repeat_item()))
-    label_hits = act(s, A.TEXT_MATCH, "标签命中",
-                     text=sk.text(ref(label_text)),
-                     WFMatchTextPattern=sk.text("^", ref(target), "$"),
-                     WFMatchTextCaseSensitive=True)
-    label_count = act(s, A.COUNT, "标签命中条数", Input=ref(label_hits),
-                      WFCountType="Items")
-    mine = num_if(s, ref(label_count), "greater_than", 0)
+    name_text = act(s, A.DETECT_TEXT, "闹钟名字", WFInput=alarm_name(sk.repeat_item()))
+    name_hits = act(s, A.TEXT_MATCH, "名字命中",
+                    text=sk.text(ref(name_text)),
+                    WFMatchTextPattern=sk.text(ref(target)),
+                    WFMatchTextCaseSensitive=False)
+    name_count = act(s, A.COUNT, "名字命中条数", Input=ref(name_hits),
+                     WFCountType="Items")
+    mine = num_if(s, ref(name_count), "greater_than", 0)
+
+    # 时刻不用单独比较：名字里已经编了时刻（排班·早班 07:45），
+    # 名字对上就等于「同班次、同响铃时刻」的闹钟已经在了。
+    # （读时刻的能力保留在 alarm_time() 里，诊断版用它显示。）
     stop("同名闹钟已在：确保它开着", sk.text(ref(target)))
     toggle(s, sk.repeat_item(), True)
     s.end_if(mine)
@@ -413,13 +439,10 @@ def build_main(debug=False):
     s.otherwise(found)
 
     # ── 4. 没有同名闹钟：先把旧的排班闹钟全关掉，再新建 ────────────────────
-    # 关旧只能用 label 属性判断（15.4 上这条判断不生效，最坏结果是旧闹钟没被关，
-    # 但不会再重复建 —— 因为「要不要建」已经由上面的文本判断决定了）。
+    # 关旧用「名字里含 排班」判断（名字是最可靠的读法，见 alarm_name()）。
+    # 注意不能写「如果 <闹钟> 包含 排班」：15.4 的「如果」不做文本比较，参数会标红。
     each_alarm = s.repeat_each(ref(alarms))
-    # 这里也不能写「如果 <闹钟 label> 包含 排班」：比较值是固定字符串没错，但**输入**
-    # 是实体属性变量，15.4 的「如果」一样标红（2026-11-12 真机：「如果重复项目 包含
-    # 排班」是红的）。统一走「转文本 → 匹配文本 → 数条数 → 条数 > 0」。
-    stale_text = act(s, A.DETECT_TEXT, "旧闹钟标签", WFInput=alarm_label(sk.repeat_item()))
+    stale_text = act(s, A.DETECT_TEXT, "旧闹钟名字", WFInput=alarm_name(sk.repeat_item()))
     stale_hits = act(s, A.TEXT_MATCH, "旧闹钟命中",
                      text=sk.text(ref(stale_text)),
                      WFMatchTextPattern=sk.text(LABEL),
