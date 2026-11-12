@@ -77,7 +77,8 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   「获取日期之间的时间」筛出 `at` 未到、且 ≤24 小时（86400 秒）的班次，
   **只处理窗口内最早的那一条，处理完就 `A.EXIT`**（找到同名时、以及新建成功后
   都要收工）。目标标签 = `label + 空格 + time`（如 `排班·早班 07:45`），
-  扫时钟里全部闹钟：同名的那一个打开、其余含「排班」的关掉、都没有才 `Add Alarm` 新建。
+  扫时钟里全部闹钟：**逐条比名字**，同名的那一个打开并立刻收工；
+  循环走完都没命中，才把其余含「排班」的关掉、再 `Add Alarm` 新建。
   所以时钟里始终只有一个在用的排班闹钟，反复运行幂等。
   **别改成「每条都处理」**：一天里「今天还有一班 + 明天有一班」时两条都落在
   24 小时窗口内，不停手就会连建两个闹钟，后一个还把前一个关掉，
@@ -103,7 +104,10 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   **Find Alarms 不要传 `WFContentItemFilter`**：iOS 26 上它被完全忽略
   （2026-11-12 真机反复验证，带过滤 8 个、不带过滤还是 8 个；补 `Values.Unit: 4`、
   换 `AlarmEntity` descriptor 都没用）。只给 `WFContentItemInputParameter: "Library"`
-  取全部闹钟，筛选放到循环里用 `label` 判断。
+  取全部闹钟，筛选放到循环里按名字判断。
+  **也不要「先把整个闹钟列表转成文本再找目标标签」**：单个闹钟整项转文本能读出名字，
+  但整个列表转文本读不到每一条的名字，判断恒为假 → 每次走「没有」分支新建，
+  旧的只是被关掉、并不消失，越跑越多。这是「重复建闹钟」的真正原因（2026-11-12 真机）。
   **找到了就收工用「停止这个快捷指令」（`A.EXIT`）**，不要用变量记状态。
   Find 的 `AppIntentDescriptor` 仍用 `find_alarms()` 覆盖成
   `AppIntentIdentifier: "AlarmEntity"` + `BundleIdentifier: "com.apple.mobiletimer"`

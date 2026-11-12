@@ -473,7 +473,10 @@ class SelectionLogic(unittest.TestCase):
         self.assertEqual({params(t)["state"] for t in toggles}, {True, False})
         notes = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.notification"]
-        self.assertEqual(len(notes), 1, "新建成功后提示一句")
+        self.assertEqual(len(notes), 2, "新建成功后提示一句；没有班次时也提示一句，别静默")
+        bodies = [params(n).get("WFNotificationActionBody", "") for n in notes]
+        self.assertTrue(any("已建闹钟" in str(b) for b in bodies), "建完要报建的什么")
+        self.assertTrue(any("没有" in str(b) for b in bodies), "没班次也要说一句")
         self.assertEqual(
             len([a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == A.EXIT]), 2,

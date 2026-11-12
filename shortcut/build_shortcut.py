@@ -380,67 +380,41 @@ def build_main(debug=False):
         stop("窗口内的班次：闹钟名与响铃时间",
              sk.text(ref(target), "\n响铃 ", ref(pretty), "（at=", ref(at), "）"))
 
-    # ── 3. 这个班次的闹钟：已经有了就收工，没有才建 ────────────────────────
+    # ── 3. 这个班次的闹钟：逐条比名字，命中就收工 ────────────────────────
     # 这里**不用过滤**：2026-11-12 真机验证，iOS 26 上 Find Alarms 完全无视
     # WFContentItemFilter（换 AlarmEntity descriptor 也一样，带过滤 8 个、
     # 不带过滤还是 8 个），只会按 WFContentItemInputParameter 返回全部闹钟。
-    # 所以取全部、在循环里用 label 自己判断。
+    #
+    # 也**不要**先「把整个列表转成文本再找目标标签」：2026-11-12 真机踩过——
+    # 单个闹钟整项转文本能读出名字，但整个列表达标转文本时读不到每一条的名字，
+    # 于是「有没有同名闹钟」永远是假，每次都走「没有」分支去新建，
+    # 旧的只是被关掉、并不会消失，越跑越多（用户反馈「重复建闹钟」）。
+    # 现在只对**每一条**判断，命中就 toggle 打开并立刻 EXIT，判断不经过列表文本。
     alarms = find_alarms(s, "全部闹钟")
 
-    # 存在性判断**不看实体属性**，改成「把闹钟列表转成文本，看里面有没有目标标签」。
-    # 2026-11-12 iOS 15.4 真机踩过：靠 label 属性（两层 aggrandizement）判断在旧
-    # 系统上根本不成立 —— 每次都当「没有同名闹钟」处理，于是重复建出一堆闹钟。
-    # 文本包含判断只依赖「把闹钟转成文字」这一件事，跨版本都成立，
-    # 而且判断失误的后果是「不建」，不会像属性判断那样误判成「该建」。
-    alarm_text = act(s, A.DETECT_TEXT, "闹钟文本", WFInput=ref(alarms))
-
     if debug:
-        stop("时钟里的全部闹钟（转成文本）",
-             "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(alarm_text)))
+        stop("时钟里的全部闹钟（共几项）", sk.text(ref(alarms)))
 
-
-    # 「有没有同名」用「文本里找得到目标标签」判断。注意**不要把变量放进「如果」的
-    # 比较值里**：2026-11-12 在 iOS 15.4 真机上，「如果 是」「如果 包含」的比较值
-    # 直接显示成红色缺参数（15.4 的「如果」只接受固定值）。所以先用「匹配文本」
-    # 数出命中条数，再用「条数 > 0」这种数字比较 —— 数字比较在两代系统上都成立。
-    hits = act(s, A.TEXT_MATCH, "命中目标标签",
-               text=sk.text(ref(alarm_text)),
-               WFMatchTextPattern=sk.text(ref(target)),
-               WFMatchTextCaseSensitive=False)
-    hit_count = act(s, A.COUNT, "命中条数", Input=ref(hits), WFCountType="Items")
-    found = num_if(s, ref(hit_count), "greater_than", 0)
-
-    # 已经有同名闹钟 → 确保它是开着的就行（可能是自己手动关掉的），然后收工。
-    # 判据是「名字对得上」**并且**「时刻对得上」：名字里已经编了时间
-    # （排班·早班 07:45），但仍拿实体上的真实时刻复核一次 —— 这样手改过的
-    # 闹钟也能被认出来，不会当成「没有」再建一个。
-    # 两条都用「匹配文本 → 数条数 → 条数 > 0」，因为 15.4 的「如果」不能做文本比较。
     each_same = s.repeat_each(ref(alarms))
     name_text = act(s, A.DETECT_TEXT, "闹钟名字", WFInput=alarm_name(sk.repeat_item()))
+    stop("这条闹钟的名字", sk.text(ref(name_text)))
     name_hits = act(s, A.TEXT_MATCH, "名字命中",
-                    text=sk.text(ref(name_text)),
-                    WFMatchTextPattern=sk.text(ref(target)),
-                    WFMatchTextCaseSensitive=False)
+                   text=sk.text(ref(name_text)),
+                   WFMatchTextPattern=sk.text(ref(target)),
+                   WFMatchTextCaseSensitive=False)
     name_count = act(s, A.COUNT, "名字命中条数", Input=ref(name_hits),
                      WFCountType="Items")
     mine = num_if(s, ref(name_count), "greater_than", 0)
-
-    # 时刻不用单独比较：名字里已经编了时刻（排班·早班 07:45），
-    # 名字对上就等于「同班次、同响铃时刻」的闹钟已经在了。
-    # （读时刻的能力保留在 alarm_time() 里，诊断版用它显示。）
-    stop("同名闹钟已在：确保它开着", sk.text(ref(target)))
+    # 名字里已经编了时刻（排班·早班 07:45），名字对上就等于同班次同响铃时刻。
+    stop("同名闹钟已在：确保它开着并收工", sk.text(ref(name_text)))
     toggle(s, sk.repeat_item(), True)
+    s.action(A.EXIT)
     s.end_if(mine)
     s.end_repeat_each(each_same)
 
-    # 已经维护好了，立刻收工，别再处理后面的班次（否则会把明天的也建出来）。
-    s.action(A.EXIT)
-
-    s.otherwise(found)
-
-    # ── 4. 没有同名闹钟：先把旧的排班闹钟全关掉，再新建 ────────────────────
+    # ── 4. 循环走完还没 EXIT，说明没有同名闹钟：先关掉旧的排班闹钟，再新建 ──
     # 关旧用「名字里含 排班」判断（名字是最可靠的读法，见 alarm_name()）。
-    # 注意不能写「如果 <闹钟> 包含 排班」：15.4 的「如果」不做文本比较，参数会标红。
+    # 不能写「如果 <闹钟> 包含 排班」：15.4 的「如果」不做文本比较，参数会标红。
     each_alarm = s.repeat_each(ref(alarms))
     stale_text = act(s, A.DETECT_TEXT, "旧闹钟名字", WFInput=alarm_name(sk.repeat_item()))
     stale_hits = act(s, A.TEXT_MATCH, "旧闹钟命中",
@@ -455,17 +429,16 @@ def build_main(debug=False):
     s.end_if(stale)
     s.end_repeat_each(each_alarm)
 
-    # dateComponents 的类型是 DateTimeComponents（App Intent 里编码成
+    # dateComponents 的类型是 DateComponents（App Intent 里编码成
     # WFDateFieldParameter）。按 shortcutkit 的 encoding-table.json，它的合法
-    # 编码只有 WFTextTokenString 一种 …\ufffc 附件，附件可以是 ActionOutput /
+    # 编码只有 WFTextTokenString 一种 \ufffc 附件，附件可以是 ActionOutput /
     # Variable / 纯文本。所以「点开选择器让你手填」不是类型写错，而是附件里
-    # 那个值 iOS 26 解析不出来。
+    # 那个值 iOS 解析不出来。
     # 2026-11-12 真机踩过两种都失败：
     #   ① 直接引用「日期」动作输出 → 卡在要求手动选日期；
     #   ② 存进变量再取 .Time 属性 → 一样卡住，而且闹钟没名字。
-    # 现在改成第三種：先用「格式化日期」把时刻拍成 "HH:mm" 文本，
-    # 再把这段**文本**交给 dateComponents。闹钟只认时刻（几点几分），
-    # 不需要整串日期，所以不必依赖 .Time 属性访问器 —— 那是版本差异最大的一环。
+    # 现在用第三种：先用「格式化日期」把时刻拍成 "HH:mm" 文本，
+    # 再把这段**文本**交给 dateComponents。闹钟只认时刻（几点几分）。
     # 不传 repeats 就是「不重复」（枚举里没有「永不」，传了反而报参数错）。
     alarm_hhmm = act(s, A.FORMAT_DATE, "响铃时刻",
                      WFDate=sk.text(ref(when)),
@@ -482,11 +455,15 @@ def build_main(debug=False):
     # 每天跑一遍就攒一堆关着的闹钟 —— 2026-11-12 用户反馈「会建很多闹钟」。
     s.action(A.EXIT)
 
-    s.end_if(found)
-
     s.end_if(soon)
     s.end_if(future)
     s.end_repeat_each(loop)
+
+    # 走到这里说明窗口内一条班次都没有（有的话上面已经 EXIT），
+    # 或者有班次但都已经处理过了 —— 发个通知说清楚，别让自动化默默什么都不做。
+    s.action(A.NOTIFICATION,
+             WFNotificationActionTitle="排班闹钟",
+             WFNotificationActionBody="未来 24 小时没有需要建闹钟的班次，本次不动时钟。")
 
     if debug:
         stop("跑完了（点「好」结束）")
