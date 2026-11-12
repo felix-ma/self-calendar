@@ -379,11 +379,29 @@ def build_main(debug=False):
         stop("时钟里的全部闹钟（转成文本）",
              "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(alarm_text)))
 
-    found = s.if_(ref(alarm_text), "contains", sk.text(ref(target)))
+    # 「有没有同名」用「文本里找得到目标标签」判断。注意**不要把变量放进「如果」的
+    # 比较值里**：2026-11-12 在 iOS 15.4 真机上，「如果 是」「如果 包含」的比较值
+    # 直接显示成红色缺参数（15.4 的「如果」只接受固定值）。所以先用「匹配文本」
+    # 数出命中条数，再用「条数 > 0」这种数字比较 —— 数字比较在两代系统上都成立。
+    hits = act(s, A.TEXT_MATCH, "命中目标标签",
+               text=sk.text(ref(alarm_text)),
+               WFMatchTextPattern=sk.text(ref(target)),
+               WFMatchTextCaseSensitive=False)
+    hit_count = act(s, A.COUNT, "命中条数", Input=ref(hits), WFCountType="Items")
+    found = num_if(s, ref(hit_count), "greater_than", 0)
 
     # 已经有同名闹钟 → 确保它是开着的就行（可能是自己手动关掉的），然后收工。
+    # 这里同样不用「如果 label 是 <变量>」，改成「标签文本里匹配 ^目标标签$」再数条数。
     each_same = s.repeat_each(ref(alarms))
-    mine = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(ref(target)))
+    label_text = act(s, A.DETECT_TEXT, "标签文本",
+                     WFInput=alarm_label(sk.repeat_item()))
+    label_hits = act(s, A.TEXT_MATCH, "标签命中",
+                     text=sk.text(ref(label_text)),
+                     WFMatchTextPattern=sk.text("^", ref(target), "$"),
+                     WFMatchTextCaseSensitive=True)
+    label_count = act(s, A.COUNT, "标签命中条数", Input=ref(label_hits),
+                      WFCountType="Items")
+    mine = num_if(s, ref(label_count), "greater_than", 0)
     stop("同名闹钟已在：确保它开着", sk.text(ref(target)))
     toggle(s, sk.repeat_item(), True)
     s.end_if(mine)

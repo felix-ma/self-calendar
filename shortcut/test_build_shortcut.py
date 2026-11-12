@@ -220,7 +220,25 @@ class GeneratedShortcut(unittest.TestCase):
                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.conditional"]
         operators = [params(c).get("WFCondition") for c in conds]
         self.assertIn(99, operators, "要用 contains 判断「是不是排班闹钟」")
-        self.assertIn(4, operators, "要用 is 判断「是不是同名」")
+
+    def test_no_variable_in_condition_values(self):
+        """「如果」的比较值里不能放变量，否则 iOS 15.4 上参数显示成红色。
+
+        对应事故（2026-11-12）：15.4 真机上「如果 是」「如果 包含」的比较值
+        直接变红、缺参数 —— 那两处正是拿「目标标签」这个动作输出做的比较。
+        15.4 的「如果」只接受固定值。所以判断改成
+        「匹配文本 → 数条数 → 条数 > 0」这一套，纯数字比较两代系统都认。
+        """
+        for action in self.actions:
+            if action["WFWorkflowActionIdentifier"] != "is.workflow.actions.conditional":
+                continue
+            value = params(action).get("WFConditionalActionString")
+            self.assertNotIsInstance(value, dict, "「如果」的比较值放了变量，15.4 会红")
+        # 判断「有没有同名」现在靠 text.match + count + 数字比较
+        self.assertGreaterEqual(
+            len([a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == A.TEXT_MATCH]), 2,
+            "命中数判断要用「匹配文本」，不能靠「如果 包含 <变量>」")
 
     def test_alarm_label_reads_entity_property(self):
         """读闹钟 label 要两层 aggrandizement，少第一层读到空值。"""
