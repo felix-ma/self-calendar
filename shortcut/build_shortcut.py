@@ -322,8 +322,10 @@ def build_main(debug=False):
     # ── 7. 诊断版：把日志复制到剪贴板并显示出来 ──────────────────────────
     if debug:
         s.action(A.SETCLIPBOARD, WFInput=sk.variable(LOGGER))
-        s.action(A.SHOWRESULT, Text=sk.text("排班闹钟·诊断日志\n\n",
-                                            sk.text(sk.variable(LOGGER))))
+        # 直接传 sk.variable(...) 这个附件；再套一层 sk.text() 就会把
+        # 字典 str() 出来（同一个坑，2026-11-12 又踩了一次）。
+        s.action(A.SHOWRESULT,
+                 Text=sk.text("排班闹钟·诊断日志\n\n", sk.variable(LOGGER)))
 
     return s
 

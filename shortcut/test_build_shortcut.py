@@ -252,6 +252,28 @@ class Diagnostics(unittest.TestCase):
             self.assertNotIn("WFSerializationType", payload["Value"]["string"],
                              "日志里出现了被 str() 的字典")
 
+    def test_no_stringified_dicts_anywhere(self):
+        """整份 plist 里任何文本都不该出现被 str() 的字典。
+
+        这条比只查 appendvariable 更宽：2026-11-12 同一个坑在「显示日志」
+        那一步又踩了一次 —— Show Result 的 Text 里套了两层 sk.text()。
+        """
+        offenders = []
+
+        def walk(node, path):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    walk(value, f"{path}.{key}")
+            elif isinstance(node, list):
+                for index, value in enumerate(node):
+                    walk(value, f"{path}[{index}]")
+            elif isinstance(node, str) and "WFSerializationType" in node:
+                offenders.append(path)
+
+        walk(self.actions, "actions")
+        self.assertEqual(offenders, [],
+                         "这些位置的文本里出现了字典原文：" + "; ".join(offenders))
+
     def test_debug_logs_end_with_output(self):
         """日志末尾要复制到剪贴板并显示，用户才能整段贴回来。"""
         ids = [a["WFWorkflowActionIdentifier"] for a in self.actions]
