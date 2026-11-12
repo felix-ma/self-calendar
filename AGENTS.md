@@ -91,6 +91,11 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   写错当场 `ValueError: unknown parameter(s)`），**必须 `.venv/bin/python` 跑**；
   签名用 `shortcut/sign.py`（远程 `playground.cherrilang.org`，产物首字节 `AEA1`）。
   两条命令见 `shortcut/README.md`「重新生成」
+- 真机排查用 **`--debug` 分步弹窗版**（`docs/paiban-alarm-debug.shortcut`）：
+  每个关键步骤弹一个「显示提醒」，点「好」继续、点「取消」停下，
+  直接把当时的 JSON 原文 / 条数 / 距今秒数 / 标签显示出来。
+  **不要把日志攒进变量再一次性显示** —— 2026-11-12 真机踩过，变量一直是空白；
+  弹窗内容也必须用 `merge()` 自己拼，不能用 `sk.text()` 套 `sk.text()`
 
 ## 提醒与通勤
 

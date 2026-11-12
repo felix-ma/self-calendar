@@ -129,51 +129,53 @@ def build_main(debug=False):
     """生成主指令。debug=True 时插入日志，用于真机排查。"""
     s = sk.Shortcut(SHORTCUT_NAME, color=4282601983, glyph=59649)
 
-    # ── 诊断日志 ──────────────────────────────────────────────────────────
-    # 只在 debug=True 时插入。每个关键节点往「日志」变量里追加一行，最后
-    # 复制到剪贴板并显示出来，方便整段复制回帖。正常版一条都不插，
-    # 免得真机每天跑都要多做几十个动作。
-    state = {"started": False}
+    # ── 断点弹窗 ──────────────────────────────────────────────────────────
+    # 只在 debug=True 时插入。每个关键步骤弹一次「Show Alert」，把那一刻的
+    # 真实值显示出来：点「好」继续往下一步，点「取消」就停在这里。
+    # 这样不用把日志攒在变量里（2026-11-12 踩过：日志变量最后一片空白，
+    # 变量在 If/Repeat 块里的写法也不确定能不能读出来），
+    # 而且能一眼看出是哪一步的值不对。
+    step = {"n": 0}
 
-    def log(*parts):
-        """追加一行日志。parts 可以是字符串，也可以是 sk.ref()/sk.text() 的结果。
+    def merge(*parts):
+        """把若干片段拼成一个 WFTextTokenString。
 
-        只用「设定变量」这一种动作：日志 = 旧日志 + 新一行。
-        不用「添加到变量」——2026-11-12 真机踩过两次：
-          · 先 Set Variable 日志 = ""，再一路 Add to Variable，最后弹出来是空白；
-          · 而 Show Result 那步把 sk.text() 又套了一层 sk.text()，印出字典原文。
-        现在两头都堵上了：文本自己拼（不让 sk.text 去 str() 字典），
-        变量只靠 Set Variable 自引用累加（不依赖 append 的语义）。
-
-        坑：sk.text() 只认 WFTextTokenAttachment，遇到已经是 WFTextTokenString
-        的参数会走 str()，把整份字典原样印出来。所以这里自己拼：遇到 token
-        string 就把它的 string 和 attachmentsByRange 一起并进来，按 UTF-16
-        偏移重新编号。
+        不能直接用 sk.text(*parts)：它只认 WFTextTokenAttachment，
+        遇到已经是 WFTextTokenString 的片段会走 str()，把字典原文印出来
+        （2026-11-12 踩过两次，测试 test_no_stringified_dicts_anywhere 会拦）。
+        这里遇到 token string 就把它内部的 string 和 attachmentsByRange
+        一起并进来，按 UTF-16 偏移重新编号。
         """
-        if not debug:
-            return
-        chunks = (sk.variable(LOGGER),) + parts if state["started"] else parts
         string = ""
         attachments = {}
-        for part in chunks:
+        for part in parts:
             if isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenString":
-                sub = part["Value"]
+                value = part["Value"]
                 offset = len(string.encode("utf-16-le")) // 2
-                for rng, value in (sub.get("attachmentsByRange") or {}).items():
+                for rng, ref in (value.get("attachmentsByRange") or {}).items():
                     start_at = int(rng.strip("{}").split(",")[0])
-                    attachments[f"{{{offset + start_at}, 1}}"] = value
-                string += sub.get("string", "")
+                    attachments[f"{{{offset + start_at}, 1}}"] = ref
+                string += value.get("string", "")
             elif isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenAttachment":
                 attachments[f"{{{len(string.encode('utf-16-le')) // 2}, 1}}"] = part["Value"]
                 string += "\ufffc"
             else:
                 string += str(part)
-        s.action(A.SETVARIABLE,
-                 WFInput={"WFSerializationType": "WFTextTokenString",
-                          "Value": {"string": string, "attachmentsByRange": attachments}},
-                 WFVariableName=LOGGER)
-        state["started"] = True
+        return {"WFSerializationType": "WFTextTokenString",
+                "Value": {"string": string, "attachmentsByRange": attachments}}
 
+    def stop(title, *parts):
+        """插一个断点：弹出 title 和此时的真实值。
+
+        点「好」继续，点「取消」终止，所以哪一步的值不对就停在哪一步。
+        """
+        if not debug:
+            return
+        step["n"] += 1
+        s.action(A.ALERT,
+                 WFAlertActionTitle=f"{step['n']}. {title}",
+                 WFAlertActionMessage=merge(*parts) if parts else "（空）",
+                 WFAlertActionCancelButtonShown=True)
 
     s.action("is.workflow.actions.comment", WFCommentActionText=(
         "每天自动跑：拉取线上排班清单（alarms.json），用「当前时间」在 alarms[] 里"
@@ -203,10 +205,13 @@ def build_main(debug=False):
                     WFGetDictionaryValueType="Value", WFDictionaryKey="alarms")
 
     if debug:
+        text_all = act(s, A.DETECT_TEXT, "清单文本", WFInput=ref(data))
         count_all = act(s, A.COUNT, "班次条数", Input=ref(all_shift),
                         WFCountType="Items")
-        log("① 拉取 alarms.json → 成功\n")
-        log("② alarms[] 条数：", sk.text(ref(count_all)), "\n")
+        stop("拉取 alarms.json：解析出的 JSON 原文",
+             sk.text(ref(text_all)))
+        stop("alarms[] 条数（应为大于 0 的数）",
+             sk.text(ref(count_all)))
 
     # ── 2. 逐条比较，挑第一条符合条件的 ─────────────────────────────────────
     # 用字符串「是/否」做标志位，「is」比较最稳。
@@ -224,8 +229,8 @@ def build_main(debug=False):
               WFTimeUntilFromDate=sk.text(sk.current_date()),
               WFTimeUntilUnit="Total Time")   # Total Time 的单位就是秒
 
-    log("   第 ", sk.text(sk.repeat_index()), " 条：at=", sk.text(ref(at)),
-        " 距今 ", sk.text(ref(gap)), " 秒\n")
+    stop("逐条比较：at 与「距今多少秒」",
+         sk.text("at = ", ref(at), "\n距今 ", ref(gap), " 秒"))
 
     future = num_if(s, ref(gap), "greater_than", 0)             # 已经过了的不算
     soon = num_if(s, ref(gap), "less_or_equal", DAY_SECONDS)    # 只用 24 小时内的
@@ -238,7 +243,8 @@ def build_main(debug=False):
     s.end_if(todo)
     s.end_repeat_each(loop)
 
-    log("③ 挑选结果——已完成=", sk.text(sk.variable("已完成")), "\n")
+    stop("循环结束：挑到了吗？（已完成=是 才有下一步）",
+         sk.text(sk.variable("已完成")))
 
     # ── 3. 挑到了才继续 ────────────────────────────────────────────────────
     picked = s.if_(sk.coerce(sk.variable("已完成"), "WFStringContentItem"),
@@ -255,8 +261,9 @@ def build_main(debug=False):
     # 目标标签 = 「排班·早班 07:45」，既是闹钟名，也是「同一个闹钟」的判据
     s.action(A.SETVARIABLE, WFInput=sk.text(ref(named), " ", ref(hhmm)),
              WFVariableName="目标标签")
-    log("   选中：", sk.text(ref(named)), " ", sk.text(ref(hhmm)),
-        "（响铃 ", sk.text(sk.property_(ref(when2), "Time")), "）\n")
+    stop("挑中的班次：闹钟名与响铃时间",
+         sk.text(ref(named), " ", ref(hhmm),
+                 "\n响铃 ", sk.property_(ref(when2), "Time")))
 
     # ── 4. 处理时钟里已有的排班闹钟 ────────────────────────────────────────
     # 过滤器交给 Find Alarms 自己做（label contains「排班」），循环里再判一次，
@@ -274,27 +281,27 @@ def build_main(debug=False):
                          WFContentItemInputParameter="Library")
         count_all_alarm = act(s, A.COUNT, "全部闹钟条数", Input=ref(all_alarms),
                               WFCountType="Items")
-        log("④ 时钟里找到（带「排班」过滤）：", sk.text(ref(count_alarm)),
-            " 个；不带过滤：", sk.text(ref(count_all_alarm)), " 个\n")
-        log("   若两个数不同 → 过滤有效；都相同且为 0 → 读不到闹钟；"
-            "都为 N 且过滤不起作用 → 过滤被忽略\n")
+        stop("时钟里的闹钟数量",
+             sk.text("带「排班」过滤：", ref(count_alarm),
+                     " 个\n不带过滤：", ref(count_all_alarm), " 个\n\n",
+                     "两个数不同 → 过滤有效\n都为 0 → 读不到闹钟\n",
+                     "都为 N、过滤不起作用 → 过滤被忽略"))
 
     s.action(A.SETVARIABLE, WFInput=sk.text("否"), WFVariableName="已存在")
 
     each_alarm = s.repeat_each(ref(alarms))
-    log("   label=[", sk.text(alarm_label(sk.repeat_item())), "]")
+    stop("时钟里的闹钟 label", sk.text(alarm_label(sk.repeat_item())))
     mine = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
-    log(" 含「排班」✓\n")
     same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(sk.variable("目标标签")))
 
     s.action(A.SETVARIABLE, WFInput=sk.text("是"), WFVariableName="已存在")
-    log(" 同名，打开\n")
+    stop("同名闹钟：将打开它", sk.text(sk.variable("目标标签")))
     # 同名闹钟：确保它是开着的（可能是之前关掉的）
     s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
              operation="turn", state=True, ShowWhenRun=False)
 
     s.otherwise(same)
-    log(" 是旧闹钟，关掉\n")
+    stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
     # 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
     s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
              operation="turn", state=False, ShowWhenRun=False)
@@ -312,15 +319,14 @@ def build_main(debug=False):
              dateComponents=sk.text(sk.property_(ref(when2), "Time")),
              name=sk.text(sk.variable("目标标签")),
              allowsSnooze=True)
-    log("⑥ 已新建闹钟\n")
+    stop("已新建闹钟", sk.text(sk.variable("目标标签")))
     s.end_if(missing)
-    log("⑧ 已有同名闹钟，未新建\n")
-
-    log("⑤ 已存在？", sk.text(sk.variable("已存在")), "\n")
+    stop("已有同名闹钟，未新建（已存在=是）",
+         sk.text(sk.variable("已存在")))
 
     # ── 6. 没挑到：提示一句，不建闹钟 ──────────────────────────────────────
     s.otherwise(picked)
-    log("③ 没挑到班次，不建闹钟\n")
+    stop("没挑到班次，本次不建闹钟", "已完成=", sk.text(sk.variable("已完成")))
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody="24 小时内没有要建的排班闹钟，本次不建。")
@@ -328,11 +334,7 @@ def build_main(debug=False):
 
     # ── 7. 诊断版：把日志复制到剪贴板并显示出来 ──────────────────────────
     if debug:
-        s.action(A.SETCLIPBOARD, WFInput=sk.variable(LOGGER))
-        # 直接传 sk.variable(...) 这个附件；再套一层 sk.text() 就会把
-        # 字典 str() 出来（同一个坑，2026-11-12 又踩了一次）。
-        s.action(A.SHOWRESULT,
-                 Text=sk.text("排班闹钟·诊断日志\n\n", sk.variable(LOGGER)))
+        stop("跑完了（点「好」结束）")
 
     return s
 

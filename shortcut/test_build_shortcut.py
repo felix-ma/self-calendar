@@ -32,6 +32,10 @@ def identifiers(actions):
     return [a["WFWorkflowActionIdentifier"] for a in actions]
 
 
+# 个别用例里用更短的名字
+ids_of = identifiers
+
+
 class GeneratedShortcut(unittest.TestCase):
     """整份指令的公共检查。"""
 
@@ -230,33 +234,53 @@ class Diagnostics(unittest.TestCase):
         cls.actions = build_shortcut.build_main(debug=True).to_plist()["WFWorkflowActions"]
 
     def test_normal_version_has_no_log_actions(self):
-        """正常版不插任何日志动作，免得每天跑多做几十步。"""
+        """正常版不插任何断点弹窗，免得每天跑都要人点十几下。"""
         normal = build_shortcut.build_main().to_plist()["WFWorkflowActions"]
-        ids = [a["WFWorkflowActionIdentifier"] for a in normal]
-        self.assertNotIn("is.workflow.actions.appendvariable", ids)
-        self.assertNotIn("is.workflow.actions.showresult", ids)
-        self.assertNotIn("is.workflow.actions.setclipboard", ids)
+        ids = ids_of(normal)
+        for noisy in ("is.workflow.actions.alert",
+                      "is.workflow.actions.showresult",
+                      "is.workflow.actions.setclipboard"):
+            self.assertNotIn(noisy, ids, f"正常版不该有 {noisy}")
 
-    def test_debug_logs_are_plain_text_tokens(self):
-        """日志文本必须是 WFTextTokenString，且不能把 dict 的 str() 印出来。
+    def test_debug_stops_are_alerts(self):
+        """诊断版用「显示提醒」当断点：点好继续、点取消终止。
 
-        对应事故（2026-11-11）：把 sk.text() 的结果又塞给 sk.text()，
-        打印出来是 "{'WFSerializationType': 'WFTextTokenString', ...}" 一串。
+        对应事故（2026-11-11/12）：把日志攒在变量里，真机上一直弹空白。
+        改成每一步单独弹窗，不依赖变量跨块传递。
         """
-        logs = [a for a in self.actions
-                if params(a).get("WFVariableName") == build_shortcut.LOGGER]
-        self.assertGreater(len(logs), 5, "诊断版应该有若干条日志")
-        for action in logs:
-            payload = params(action)["WFInput"]
-            self.assertEqual(payload["WFSerializationType"], "WFTextTokenString")
-            self.assertNotIn("WFSerializationType", payload["Value"]["string"],
-                             "日志里出现了被 str() 的字典")
+        alerts = [a for a in self.actions
+                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.alert"]
+        self.assertGreaterEqual(len(alerts), 8, "诊断版应该有多处断点")
+        for action in alerts:
+            p = params(action)
+            self.assertTrue(p.get("WFAlertActionTitle"), "断点要有标题")
+            self.assertIn("WFAlertActionMessage", p, "断点要有内容")
+            # 取消按钮要显示，用户才能在某一步停下
+            self.assertTrue(p.get("WFAlertActionCancelButtonShown"),
+                            "断点必须能取消，否则没法停在出问题的那一步")
+
+    def test_debug_first_stop_shows_raw_json(self):
+        """第一个断点显示解析出来的 JSON 原文，先确认数据源本身正常。"""
+        first = [a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.alert"][0]
+        message = params(first)["WFAlertActionMessage"]["Value"]
+        refs = [v for v in message.get("attachmentsByRange", {}).values()]
+        self.assertTrue(refs, "第一个断点要引用真实动作输出，不能是死文本")
+        # 应该是把响应正文取成文本（Get Text from Input）的那个动作
+        outputs = {params(a).get("CustomOutputName"): a
+                   for a in self.actions
+                   if params(a).get("CustomOutputName")}
+        self.assertIn("清单文本", outputs)
+        self.assertEqual(outputs["清单文本"]["WFWorkflowActionIdentifier"],
+                         "is.workflow.actions.detect.text")
 
     def test_no_stringified_dicts_anywhere(self):
         """整份 plist 里任何文本都不该出现被 str() 的字典。
 
-        这条比只查 appendvariable 更宽：2026-11-12 同一个坑在「显示日志」
-        那一步又踩了一次 —— Show Result 的 Text 里套了两层 sk.text()。
+        这条比只查某一种动作更宽：2026-11-12 同一个坑在「日志」和
+        「显示日志」两处各踩了一次，现在换成弹窗又踩了一次。
+        sk.text() 只认 WFTextTokenAttachment，遇到已拼好的 WFTextTokenString
+        会 str() 出字典原文 —— 所以拼接一律走 merge()。
         """
         offenders = []
 
@@ -274,39 +298,22 @@ class Diagnostics(unittest.TestCase):
         self.assertEqual(offenders, [],
                          "这些位置的文本里出现了字典原文：" + "; ".join(offenders))
 
-    def test_debug_log_accumulates_with_set_variable(self):
-        """日志只靠「设定变量」自引用累加，不用「添加到变量」。
-
-        2026-11-12 真机：先 Set Variable 日志 = ""，再一路 Add to Variable，
-        最后弹出来一片空白。改成第一条写实际内容、之后每条都是
-        「日志 = 旧日志 + 新一行」。
-        """
-        log_actions = [a for a in self.actions
-                       if params(a).get("WFVariableName") == build_shortcut.LOGGER]
-        self.assertGreaterEqual(len(log_actions), 6)
-        for action in log_actions:
-            self.assertEqual(action["WFWorkflowActionIdentifier"],
-                             "is.workflow.actions.setvariable",
-                             "日志应该只用 Set Variable 累加")
-        # 第一条不能引用自己（那时还没值），后面每条都必须引用上一版
-        first = params(log_actions[0])["WFInput"]["Value"]
-        self.assertNotIn("日志", str(first.get("attachmentsByRange")))
-        for action in log_actions[1:]:
-            payload = params(action)["WFInput"]["Value"]
-            refs = [v.get("VariableName") for v in payload["attachmentsByRange"].values()]
-            self.assertIn(build_shortcut.LOGGER, refs, "后一条日志要接着旧的往下写")
-
-    def test_debug_logs_end_with_output(self):
-        """日志末尾要复制到剪贴板并显示，用户才能整段贴回来。"""
-        ids = [a["WFWorkflowActionIdentifier"] for a in self.actions]
-        self.assertIn("is.workflow.actions.setclipboard", ids)
-        self.assertIn("is.workflow.actions.showresult", ids)
-        clip = ids.index("is.workflow.actions.setclipboard")
-        show = ids.index("is.workflow.actions.showresult")
-        self.assertLess(clip, show)
+    def test_debug_stops_are_plain_attachments(self):
+        """弹窗内容的附件必须是裸引用，不能多包一层。"""
+        for action in self.actions:
+            p = params(action)
+            if action["WFWorkflowActionIdentifier"] != "is.workflow.actions.alert":
+                continue
+            message = p.get("WFAlertActionMessage")
+            if not isinstance(message, dict):
+                continue
+            self.assertEqual(message["WFSerializationType"], "WFTextTokenString")
+            for ref in message["Value"].get("attachmentsByRange", {}).values():
+                self.assertNotIn("WFSerializationType", ref,
+                                 "附件不该再包 WFTextTokenAttachment 外壳")
 
     def test_debug_blocks_still_paired(self):
-        """插日志不能把 If / Repeat 的括号搞坏。"""
+        """插断点不能把 If / Repeat 的括号搞坏。"""
         groups = {}
         for action in self.actions:
             p = params(action)
