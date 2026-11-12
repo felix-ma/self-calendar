@@ -150,16 +150,28 @@ class GeneratedShortcut(unittest.TestCase):
         self.assertIn("name", p)
 
     def test_clock_descriptors(self):
-        """三个闹钟动作的 descriptor 都用 com.apple.clock。"""
-        clock_actions = {A.CLOCK_ADD_ALARM, A.CLOCK_FIND_ALARMS, A.CLOCK_TOGGLE_ALARM}
+        """三个闹钟动作的 descriptor 用真机验证过的那份，别跟着目录走。
+
+        shortcutkit 目录给的是 com.apple.clock + MTGetAlarmsIntent / ToggleAlarmIntent /
+        CreateAlarmIntent。这套能取到闹钟，但 Find Alarms 的 WFContentItemFilter
+        会被静默忽略（真机断点：带过滤 8 个 / 不带过滤 8 个），所以这里显式覆盖成
+        com.apple.mobiletimer，Find 的 AppIntentIdentifier 是 AlarmEntity。
+        """
+        expected = {
+            A.CLOCK_ADD_ALARM: "CreateAlarmIntent",
+            A.CLOCK_FIND_ALARMS: "AlarmEntity",
+            A.CLOCK_TOGGLE_ALARM: "ToggleAlarmIntent",
+        }
         seen = set()
         for action in self.actions:
-            if action["WFWorkflowActionIdentifier"] in clock_actions:
+            identifier = action["WFWorkflowActionIdentifier"]
+            if identifier in expected:
                 desc = params(action)["AppIntentDescriptor"]
-                self.assertEqual(desc["BundleIdentifier"], "com.apple.clock")
+                self.assertEqual(desc["BundleIdentifier"], "com.apple.mobiletimer")
                 self.assertEqual(desc["Name"], "Clock")
-                seen.add(action["WFWorkflowActionIdentifier"])
-        self.assertEqual(seen, clock_actions, "三个闹钟动作应全部出现")
+                self.assertEqual(desc["AppIntentIdentifier"], expected[identifier])
+                seen.add(identifier)
+        self.assertEqual(seen, set(expected), "三个闹钟动作应全部出现")
 
     def test_toggle_has_all_required_params(self):
         """Toggle 必须带 alarm + operation + state，少一个就是「参数没选值」。"""
@@ -273,6 +285,22 @@ class Diagnostics(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.actions = build_shortcut.build_main(debug=True).to_plist()["WFWorkflowActions"]
+
+    def test_comment_shows_build_stamp(self):
+        """第一个注释要带生成时间戳。
+
+        事故（2026-11-12）：改完逻辑让用户重新导入，跑出来还是旧行为，
+        分不清是"没改对"还是"手机上装的是旧的"。所以每次生成都把一个
+        时间戳写进最上面的注释，导入后打开就能确认版本。
+        """
+        first = self.actions[0]
+        self.assertEqual(first["WFWorkflowIdentifier"]
+                         if "WFWorkflowIdentifier" in first
+                         else first["WFWorkflowActionIdentifier"],
+                         "is.workflow.actions.comment")
+        text = first["WFWorkflowActionParameters"]["WFCommentActionText"]
+        self.assertTrue(text.startswith("版本："), "第一个注释要以「版本：」开头")
+        self.assertRegex(text.split("\n")[0], r"^版本：\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 
     def test_normal_version_has_no_log_actions(self):
         """正常版不插任何断点弹窗，免得每天跑都要人点十几下。"""

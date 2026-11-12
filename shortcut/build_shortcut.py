@@ -46,6 +46,7 @@ shortcutkit 目录查出来、之前手写 plist 写错的几处（别再改回�
 """
 import plistlib
 import sys
+import datetime
 import uuid
 from pathlib import Path
 
@@ -66,7 +67,61 @@ CLIENT_VERSION = "1092.9.13.2"
 
 ALARM_ENTITY_CLASS = "WFLinkEntityContentItem_com.apple.clock_AlarmEntity"
 
+# Find Alarms 的 AppIntentDescriptor 必须手写，不能用 shortcutkit 目录里那份。
+# 目录（取自 Shortcuts 10.0）给的是 AppIntentIdentifier=MTGetAlarmsIntent +
+# BundleIdentifier=com.apple.clock：这个组合能取到闹钟，但 WFContentItemFilter
+# 会被静默忽略 —— 2026-11-12 真机断点里「带排班过滤 8 个 / 不带过滤 8 个」
+# 两个数一样，就是它。真机上真正生效的写法（vergenzt/shortcuts 里的三份实现
+# 全部如此）是 AlarmEntity + com.apple.mobiletimer。
+ALARM_ENTITY_DESCRIPTOR = {
+    "ActionRequiresAppInstallation": True,
+    "AppIntentIdentifier": "AlarmEntity",
+    "BundleIdentifier": "com.apple.mobiletimer",
+    "Name": "Clock",
+    "TeamIdentifier": "0000000000",
+}
+
+# Toggle / Add 用同一套 bundle，只是 AppIntentIdentifier 不同（照参考实现）。
+CLOCK_BUNDLE = "com.apple.mobiletimer"
+
+
+def clock_descriptor(identifier):
+    return {"ActionRequiresAppInstallation": True,
+            "AppIntentIdentifier": identifier,
+            "BundleIdentifier": CLOCK_BUNDLE,
+            "Name": "Clock",
+            "TeamIdentifier": "0000000000"}
+
+
+def _override_descriptor(action, identifier):
+    """把 shortcutkit 按目录自动写的 descriptor 换成真机验证过的那份。"""
+    action["WFWorkflowActionParameters"]["AppIntentDescriptor"] = clock_descriptor(
+        identifier)
+    return action
+
+
+def toggle(s, alarm, on):
+    """开/关一个闹钟。不删除、不弹确认框。"""
+    action = s.action(A.CLOCK_TOGGLE_ALARM, alarm=alarm, operation="turn",
+                      state=on, ShowWhenRun=False)
+    return _override_descriptor(action, "ToggleAlarmIntent")
+
+
+def add_alarm(s, date_components, name):
+    """建一个不重复的闹钟。
+
+    不传 repeats 就是「不重复」：枚举里只有 sunday..saturday，没有「永不」。
+    也没有 label / repeatSchedule 这两个参数 —— 多传会报「请为参数选取值」。
+    """
+    action = s.action(A.CLOCK_ADD_ALARM, dateComponents=date_components,
+                      name=name, allowsSnooze=True)
+    return _override_descriptor(action, "CreateAlarmIntent")
+
 LOGGER = "日志"            # debug 版的累积变量名
+
+# 版本戳：出现在快捷指令最上面的注释里，用来判断手机上装的是不是最新生成的那份。
+# 每次生成自动取当前时间，所以「重新下载后版本没变」就说明装的还是旧的。
+BUILD_STAMP = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
 def act(s, identifier, name=None, **params):
@@ -148,6 +203,21 @@ def label_filter(operator, value):
                            "Values": {"String": value, "Unit": 4}}]}}
 
 
+def find_alarms(s, name, filter_=None):
+    """加一个 Find Alarms，并把 descriptor 换成真机上过滤生效的那份。
+
+    shortcutkit 会按目录自动写 descriptor，但那组合让 WFContentItemFilter 失效
+    （见 ALARM_ENTITY_DESCRIPTOR 的注释），所以这里生成完再覆盖掉。
+    """
+    params = {"WFContentItemInputParameter": "Library"}
+    if filter_ is not None:
+        params["WFContentItemFilter"] = filter_
+    action = act(s, A.CLOCK_FIND_ALARMS, name, **params)
+    action["WFWorkflowActionParameters"]["AppIntentDescriptor"] = dict(
+        ALARM_ENTITY_DESCRIPTOR)
+    return action
+
+
 def build_main(debug=False):
     """生成主指令。debug=True 时插入日志，用于真机排查。"""
     s = sk.Shortcut(SHORTCUT_NAME, color=4282601983, glyph=59649)
@@ -201,6 +271,9 @@ def build_main(debug=False):
                  WFAlertActionCancelButtonShown=True)
 
     s.action("is.workflow.actions.comment", WFCommentActionText=(
+        f"版本：{BUILD_STAMP}\n"
+        "（这一行是生成时间戳，用来看手机上装的是不是最新的那份。"
+        "导入后第一次打开快捷指令就能在最上面看到。）\n\n"
         "每天自动跑：拉取线上排班清单（alarms.json），用「当前时间」在 alarms[] 里"
         "挑出下一条还没到、且距现在不超过 24 小时的班次，在时钟里维护一个"
         "「排班·班次 时:分」的闹钟。\n\n"
@@ -272,15 +345,12 @@ def build_main(debug=False):
          sk.text(ref(target), "\n响铃 ", sk.property_(ref(when), "Time")))
 
     # ── 3. 这个班次的闹钟：同名打开、其余「排班」关掉 ──────────────────────
-    alarms = act(s, A.CLOCK_FIND_ALARMS, "闹钟",
-                 WFContentItemInputParameter="Library",
-                 WFContentItemFilter=label_filter(99, LABEL))
+    alarms = find_alarms(s, "闹钟", label_filter(99, LABEL))
 
     if debug:
         count_alarm = act(s, A.COUNT, "闹钟条数", Input=ref(alarms),
                           WFCountType="Items")
-        all_alarms = act(s, A.CLOCK_FIND_ALARMS, "全部闹钟",
-                         WFContentItemInputParameter="Library")
+        all_alarms = find_alarms(s, "全部闹钟")
         count_all_alarm = act(s, A.COUNT, "全部闹钟条数", Input=ref(all_alarms),
                               WFCountType="Items")
         stop("时钟里的闹钟数量",
@@ -295,32 +365,25 @@ def build_main(debug=False):
 
     stop("同名闹钟：将打开它", sk.text(ref(target)))
     # 同名闹钟：确保它是开着的（可能是之前关掉的）
-    s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
-             operation="turn", state=True, ShowWhenRun=False)
+    toggle(s, sk.repeat_item(), True)
 
     s.otherwise(same)
     stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
     # 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
-    s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
-             operation="turn", state=False, ShowWhenRun=False)
+    toggle(s, sk.repeat_item(), False)
 
     s.end_if(same)
     s.end_if(mine)
     s.end_repeat_each(each_alarm)
 
     # ── 4. 时钟里没有同名闹钟才新建 ────────────────────────────────────────
-    existing = act(s, A.CLOCK_FIND_ALARMS, "同名闹钟",
-                   WFContentItemInputParameter="Library",
-                   WFContentItemFilter=label_filter(4, sk.text(ref(target))))
+    existing = find_alarms(s, "同名闹钟", label_filter(4, sk.text(ref(target))))
     found = act(s, A.COUNT, "同名闹钟条数", Input=ref(existing), WFCountType="Items")
 
     missing = num_if(s, ref(found), "less_or_equal", 0)
     # 取日期的 .Time 属性：闹钟只要「时:分」。不传 repeats 就是「不重复」
     # （枚举里没有「永不」，传了反而报参数错）。
-    s.action(A.CLOCK_ADD_ALARM,
-             dateComponents=sk.text(sk.property_(ref(when), "Time")),
-             name=sk.text(ref(target)),
-             allowsSnooze=True)
+    add_alarm(s, sk.text(sk.property_(ref(when), "Time")), sk.text(ref(target)))
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody=merge("已建闹钟：", sk.text(ref(target))))
@@ -353,4 +416,4 @@ if __name__ == "__main__":
     dst = Path(argv[0] if argv else "排班闹钟.plist")
     data = to_xml(build_main(debug=debug))
     dst.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_XML))
-    print(f"已生成 {dst}（{len(data['WFWorkflowActions'])} 个动作）")
+    print(f"已生成 {dst}（{len(data['WFWorkflowActions'])} 个动作，版本 {BUILD_STAMP}）")

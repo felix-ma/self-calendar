@@ -68,7 +68,7 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 | --- | --- |
 | `Add Alarm` 传了 `label`、`repeatSchedule` | 真机报「请为此操作中的每个参数选取值，然后终止了」 |
 | `repeats` 传 `"Never"` | 枚举里只有 sunday…saturday，传了就是非法值；不传才是"不重复" |
-| descriptor 的 `BundleIdentifier` 写成 `com.apple.mobiletimer` | 目录里三个闹钟动作都是 `com.apple.clock` |
+| descriptor 照抄目录的 `com.apple.clock` | Find Alarms 的过滤被静默忽略（见下），筛出全部闹钟 |
 | 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
 | `WFNumberValue` 写成整数 | 数字比较永远为假（见下） |
 | 读实体属性的 aggrandizement 漏了 `PropertyUserInfo` | 把属性名当字面量输出（断点里显示成英文单词 `label`），条件恒假 |
@@ -96,6 +96,16 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 真机断点里"带排班过滤 8 个 / 不带过滤 8 个"两个数一模一样，于是把自己该新建的
 闹钟也当成"同名已存在"，一个都不建。所以生成器改用自写的 `label_filter()`，
 测试 `test_label_filter_has_unit` 会拦。
+
+**Find Alarms 的 `AppIntentDescriptor` 不能用目录自动生成的那份。** shortcutkit
+按 Shortcuts 10.0 的目录给的是 `AppIntentIdentifier: MTGetAlarmsIntent` +
+`BundleIdentifier: com.apple.clock`。这套动作能跑、也能取到闹钟，但
+`WFContentItemFilter` 会被整体忽略 —— 2026-11-12 真机断点里"带排班过滤 8 个 /
+不带过滤 8 个"两个数一模一样，就是它，跟 `Values.Unit` 缺失是两个独立的坑。
+真机上真正生效的写法（`vergenzt/shortcuts` 里三份实现全部如此）是
+`AppIntentIdentifier: "AlarmEntity"` + `BundleIdentifier: "com.apple.mobiletimer"`。
+所以生成器用 `find_alarms()` 统一覆盖 descriptor，Toggle / Add 也归到
+`com.apple.mobiletimer`；测试 `test_clock_descriptors` 会拦。
 
 **签名仍走 `playground.cherrilang.org`**：shortcutkit 的 `sign()` 是 `subprocess`
 调 macOS 的 `shortcuts sign` CLI，Linux 上跑不了；`sign.py` 改用远程签名服务，
