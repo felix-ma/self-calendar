@@ -175,17 +175,34 @@ class GeneratedShortcut(unittest.TestCase):
         self.assertEqual({params(t)["state"] for t in toggles}, {True, False})
 
     def test_find_alarms_has_input_and_filter(self):
-        """Find Alarms 要给数据源和过滤器，否则等于没选值。"""
+        """每次 Find Alarms 都要给数据源和过滤器，否则等于没选值。
+
+        现在有两处查找：① 列出所有「排班」闹钟（contains 99）；
+        ② 按目标标签精确找同名闹钟（is 4）。两处的过滤值都必须齐全。
+        """
         finds = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
-        self.assertEqual(len(finds), 1)
-        p = params(finds[0])
-        self.assertEqual(p["WFContentItemInputParameter"], "Library")
-        templates = p["WFContentItemFilter"]["Value"]["WFActionParameterFilterTemplates"]
-        self.assertEqual(len(templates), 1)
-        self.assertEqual(templates[0]["Property"], "label")   # 小写
-        self.assertEqual(templates[0]["Operator"], 99)        # contains
-        self.assertEqual(templates[0]["Values"]["String"], build_shortcut.LABEL)
+        self.assertEqual(len(finds), 2)
+        operators = []
+        for find in finds:
+            p = params(find)
+            self.assertEqual(p["WFContentItemInputParameter"], "Library")
+            templates = p["WFContentItemFilter"]["Value"]["WFActionParameterFilterTemplates"]
+            self.assertEqual(len(templates), 1)
+            self.assertEqual(templates[0]["Property"], "label")   # 小写
+            self.assertTrue(templates[0]["Values"]["String"], "过滤值不能为空")
+            operators.append(templates[0]["Operator"])
+        self.assertEqual(operators, [99, 4])                      # contains / is
+
+    def test_filter_can_reference_action_output(self):
+        """同名判断用动作输出当过滤值，不靠变量（变量跨块会读到空）。"""
+        finds = [a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
+        exact = params(finds[-1])["WFContentItemFilter"]["Value"][
+            "WFActionParameterFilterTemplates"][0]["Values"]["String"]
+        self.assertEqual(exact["WFSerializationType"], "WFTextTokenString")
+        self.assertTrue(exact["Value"]["attachmentsByRange"],
+                        "精确查找的标签必须是动作输出，不能是写死的文本")
 
     def test_alarm_label_reads_entity_property(self):
         """读闹钟 label 要两层 aggrandizement，少第一层读到空值。"""
@@ -360,23 +377,35 @@ class SelectionLogic(unittest.TestCase):
             p = params(a)
             if "WFNumberValue" in p:
                 conds.append((p["WFCondition"], p["WFNumberValue"]))
-        self.assertEqual(len(conds), 2)
         self.assertIn((2, "0"), conds)                              # 大于 0：还没到
         self.assertIn((1, str(build_shortcut.DAY_SECONDS)), conds)   # 小于等于 86400
         self.assertEqual(build_shortcut.DAY_SECONDS, 24 * 3600)
 
-    def test_stops_after_first_match(self):
-        """挑到第一条后用「已完成」标志位停手，不会把后面几条也覆盖掉。"""
-        names = [params(a).get("WFVariableName") for a in self.actions
-                 if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.setvariable"]
-        self.assertIn("已完成", names)
-        self.assertIn("目标", names)
+    def test_no_variables_at_all(self):
+        """一个 Set Variable 都不许有。
 
-    def test_notifies_when_nothing_found(self):
-        """一条都没挑到时只提示，不建闹钟。"""
+        2026-11-12 真机实测：iOS 26 上 Set Variable 写的变量在 Repeat/If
+        块里写、块外读会得到空值。旧的「已完成」标志因此永远是空 → 循环体
+        整段被跳过 → 一条班次都挑不到，还不报错。所以整套逻辑只用动作输出
+        当引用，不用任何变量。
+        """
+        used = [a for a in self.actions
+                if a["WFWorkflowActionIdentifier"] in
+                ("is.workflow.actions.setvariable",
+                 "is.workflow.actions.appendvariable")]
+        self.assertEqual(used, [], "不要在快捷指令里用变量，改用动作输出")
+
+    def test_each_shift_maintains_its_own_alarm(self):
+        """窗口内每条班次各自找闹钟、各自开关或新建（不再只挑第一条）。"""
+        creates = [a for a in self.actions
+                   if a["WFWorkflowActionIdentifier"] == A.CLOCK_ADD_ALARM]
+        self.assertEqual(len(creates), 1)
+        toggles = [a for a in self.actions
+                   if a["WFWorkflowActionIdentifier"] == A.CLOCK_TOGGLE_ALARM]
+        self.assertEqual({params(t)["state"] for t in toggles}, {True, False})
         notes = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.notification"]
-        self.assertTrue(notes, "缺少「本次不建」的提示")
+        self.assertEqual(len(notes), 1, "新建成功后提示一句")
 
 
 if __name__ == "__main__":

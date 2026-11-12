@@ -213,13 +213,17 @@ def build_main(debug=False):
         stop("alarms[] 条数（应为大于 0 的数）",
              sk.text(ref(count_all)))
 
-    # ── 2. 逐条比较，挑第一条符合条件的 ─────────────────────────────────────
-    # 用字符串「是/否」做标志位，「is」比较最稳。
-    s.action(A.SETVARIABLE, WFInput=sk.text("否"), WFVariableName="已完成")
-
+    # ── 2. 遍历清单，对「24 小时内」的班次各自维护闹钟 ─────────────────────
+    # 这里**不用任何 Set Variable**（2026-11-12 真机踩过：变量在 Repeat/If
+    # 块里写、块外读会得到空值，「已完成」标志读到空 → 循环体整段被跳过 →
+    # 一条班次都挑不到，而且完全不报错）。所以改成不看结果、直接按条办事：
+    # 每条落在窗口内的班次各自算标签、各自找闹钟、各自开关或新建，
+    # 全程只用「动作输出」当引用（动作输出跨块可读，可靠）。
+    #
+    # 窗口仍然是「at 还没到、且距现在不超过 24 小时」：
+    # 闹钟只有「时:分」没有日期，超过一天建出来会在今天先响一次。
+    # 实际每天最多命中一条（同一天两个班次才是两条），所以不会越攒越多。
     loop = s.repeat_each(ref(all_shift))
-    todo = s.if_(sk.coerce(sk.variable("已完成"), "WFStringContentItem"),
-                 "is", "否")
 
     at = act(s, A.GETVALUEFORKEY, "开始时刻", WFInput=sk.repeat_item(),
              WFGetDictionaryValueType="Value", WFDictionaryKey="at")
@@ -235,39 +239,16 @@ def build_main(debug=False):
     future = num_if(s, ref(gap), "greater_than", 0)             # 已经过了的不算
     soon = num_if(s, ref(gap), "less_or_equal", DAY_SECONDS)    # 只用 24 小时内的
 
-    s.action(A.SETVARIABLE, WFInput=sk.repeat_item(), WFVariableName="目标")
-    s.action(A.SETVARIABLE, WFInput=sk.text("是"), WFVariableName="已完成")
-
-    s.end_if(soon)
-    s.end_if(future)
-    s.end_if(todo)
-    s.end_repeat_each(loop)
-
-    stop("循环结束：挑到了吗？（已完成=是 才有下一步）",
-         sk.text(sk.variable("已完成")))
-
-    # ── 3. 挑到了才继续 ────────────────────────────────────────────────────
-    picked = s.if_(sk.coerce(sk.variable("已完成"), "WFStringContentItem"),
-                   "is", "是")
-
-    at2 = act(s, A.GETVALUEFORKEY, "响铃时刻", WFInput=sk.variable("目标"),
-              WFGetDictionaryValueType="Value", WFDictionaryKey="at")
-    when2 = act(s, A.DETECT_DATE, "响铃日期", WFInput=ref(at2))
-    named = act(s, A.GETVALUEFORKEY, "闹钟名", WFInput=sk.variable("目标"),
+    named = act(s, A.GETVALUEFORKEY, "闹钟名", WFInput=sk.repeat_item(),
                 WFGetDictionaryValueType="Value", WFDictionaryKey="label")
-    hhmm = act(s, A.GETVALUEFORKEY, "时刻", WFInput=sk.variable("目标"),
+    hhmm = act(s, A.GETVALUEFORKEY, "时刻", WFInput=sk.repeat_item(),
                WFGetDictionaryValueType="Value", WFDictionaryKey="time")
-
     # 目标标签 = 「排班·早班 07:45」，既是闹钟名，也是「同一个闹钟」的判据
-    s.action(A.SETVARIABLE, WFInput=sk.text(ref(named), " ", ref(hhmm)),
-             WFVariableName="目标标签")
-    stop("挑中的班次：闹钟名与响铃时间",
-         sk.text(ref(named), " ", ref(hhmm),
-                 "\n响铃 ", sk.property_(ref(when2), "Time")))
+    target = act(s, A.GETTEXT, "目标标签", WFTextActionText=sk.text(ref(named), " ", ref(hhmm)))
+    stop("窗口内的班次：闹钟名与响铃时间",
+         sk.text(ref(target), "\n响铃 ", sk.property_(ref(when), "Time")))
 
-    # ── 4. 处理时钟里已有的排班闹钟 ────────────────────────────────────────
-    # 过滤器交给 Find Alarms 自己做（label contains「排班」），循环里再判一次，
-    # 这样即使某版 iOS 忽略过滤条件，也绝不会碰到别人的闹钟。
+    # ── 3. 这个班次的闹钟：同名打开、其余「排班」关掉 ──────────────────────
     alarms = act(s, A.CLOCK_FIND_ALARMS, "闹钟",
                  WFContentItemInputParameter="Library",
                  WFContentItemFilter=sk.where(("label", "contains", LABEL)))
@@ -275,8 +256,6 @@ def build_main(debug=False):
     if debug:
         count_alarm = act(s, A.COUNT, "闹钟条数", Input=ref(alarms),
                           WFCountType="Items")
-        # 再查一次「不带任何过滤」，两条数一对比就知道是过滤失效、
-        # 还是压根读不到闹钟。
         all_alarms = act(s, A.CLOCK_FIND_ALARMS, "全部闹钟",
                          WFContentItemInputParameter="Library")
         count_all_alarm = act(s, A.COUNT, "全部闹钟条数", Input=ref(all_alarms),
@@ -284,18 +263,14 @@ def build_main(debug=False):
         stop("时钟里的闹钟数量",
              sk.text("带「排班」过滤：", ref(count_alarm),
                      " 个\n不带过滤：", ref(count_all_alarm), " 个\n\n",
-                     "两个数不同 → 过滤有效\n都为 0 → 读不到闹钟\n",
-                     "都为 N、过滤不起作用 → 过滤被忽略"))
-
-    s.action(A.SETVARIABLE, WFInput=sk.text("否"), WFVariableName="已存在")
+                     "两个数不同 → 过滤有效\n都为 0 → 读不到闹钟"))
 
     each_alarm = s.repeat_each(ref(alarms))
     stop("时钟里的闹钟 label", sk.text(alarm_label(sk.repeat_item())))
     mine = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
-    same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(sk.variable("目标标签")))
+    same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(ref(target)))
 
-    s.action(A.SETVARIABLE, WFInput=sk.text("是"), WFVariableName="已存在")
-    stop("同名闹钟：将打开它", sk.text(sk.variable("目标标签")))
+    stop("同名闹钟：将打开它", sk.text(ref(target)))
     # 同名闹钟：确保它是开着的（可能是之前关掉的）
     s.action(A.CLOCK_TOGGLE_ALARM, alarm=sk.repeat_item(),
              operation="turn", state=True, ShowWhenRun=False)
@@ -310,29 +285,31 @@ def build_main(debug=False):
     s.end_if(mine)
     s.end_repeat_each(each_alarm)
 
-    # ── 5. 没有同名闹钟才新建 ──────────────────────────────────────────────
-    missing = s.if_(sk.coerce(sk.variable("已存在"), "WFStringContentItem"),
-                    "is", "否")
+    # ── 4. 时钟里没有同名闹钟才新建 ────────────────────────────────────────
+    existing = act(s, A.CLOCK_FIND_ALARMS, "同名闹钟",
+                   WFContentItemInputParameter="Library",
+                   WFContentItemFilter=sk.where(("label", "is", sk.text(ref(target)))))
+    found = act(s, A.COUNT, "同名闹钟条数", Input=ref(existing), WFCountType="Items")
+
+    missing = num_if(s, ref(found), "less_or_equal", 0)
     # 取日期的 .Time 属性：闹钟只要「时:分」。不传 repeats 就是「不重复」
     # （枚举里没有「永不」，传了反而报参数错）。
     s.action(A.CLOCK_ADD_ALARM,
-             dateComponents=sk.text(sk.property_(ref(when2), "Time")),
-             name=sk.text(sk.variable("目标标签")),
+             dateComponents=sk.text(sk.property_(ref(when), "Time")),
+             name=sk.text(ref(target)),
              allowsSnooze=True)
-    stop("已新建闹钟", sk.text(sk.variable("目标标签")))
-    s.end_if(missing)
-    stop("已有同名闹钟，未新建（已存在=是）",
-         sk.text(sk.variable("已存在")))
-
-    # ── 6. 没挑到：提示一句，不建闹钟 ──────────────────────────────────────
-    s.otherwise(picked)
-    stop("没挑到班次，本次不建闹钟", "已完成=", sk.text(sk.variable("已完成")))
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
-             WFNotificationActionBody="24 小时内没有要建的排班闹钟，本次不建。")
-    s.end_if(picked)
+             WFNotificationActionBody=merge("已建闹钟：", sk.text(ref(target))))
+    stop("已新建闹钟", sk.text(ref(target)))
+    s.end_if(missing)
 
-    # ── 7. 诊断版：把日志复制到剪贴板并显示出来 ──────────────────────────
+    stop("已有同名闹钟，未新建", sk.text(ref(target)), "\n", ref(found), " 个")
+
+    s.end_if(soon)
+    s.end_if(future)
+    s.end_repeat_each(loop)
+
     if debug:
         stop("跑完了（点「好」结束）")
 
