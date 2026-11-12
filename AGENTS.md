@@ -87,11 +87,12 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   导致循环体整段被跳过、一条班次都挑不到，而且完全不报错。
   只拿**动作输出**当引用（动作输出跨块可读）。需要「记住」一个值时，
   用 `Get Text` 之类的动作产出，再用 `sk.ref(那个动作)` 引用。
-  **唯一例外是 `WAKE_VAR`（`排班时间`）**：`Add Alarm` 的 `dateComponents`
-  必须取变量的 `.Time`，直接塞日期动作的输出会让 iOS 26 弹「请选日期」并卡死
-  （2026-11-12 用户原话「会一直卡死在一个弹窗，需要用户手动输入日期才可以创建」）。
-  这个变量写和读都紧挨着 `Add Alarm`、同块内，不跨块，安全；
-  `test_only_one_variable_and_it_is_for_the_alarm_time` 守着它。
+  **一个变量都不要用**：`Add Alarm` 的 `dateComponents` 也别走变量 ——
+  2026-11-12 真机试过「日期先落进变量、再取 `.Time`」，照样卡在选日期弹窗里、
+  闹钟还没名字。改成用「格式化日期」（`WFDateFormatStyle: Custom`、
+  `WFDateFormat: HH:mm`）拍出 `"07:45"` 文本，直接交给 `dateComponents`；
+  闹钟只认时刻，不需要整串日期。`test_no_variables_at_all` 与
+  `test_alarm_time_is_formatted_hhmm_text` 守着这条线。
   **读闹钟 `label` 必须带 `PropertyUserInfo`**（`WFPropertyVariableAggrandizement`
   里写 `WFLinkEntityContentPropertyUserInfoPropertyIdentifier: "label"`）；
   少了它 iOS 把属性名当字面量输出，断点里显示成英文单词 `label`，条件恒假。

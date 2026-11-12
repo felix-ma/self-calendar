@@ -171,14 +171,24 @@ iOS 26 上 `Set Variable` 写的变量，在 `Repeat` / `If` 块**里面**写、
 所以：**跨块状态一概不用变量**，只拿动作输出当引用；需要"记住"一个值时，
 就多做一个 `Get Text` 之类的动作产出它，后面用 `sk.ref(那个动作)` 引用。
 想收工时直接用「停止这个快捷指令」，而不是用变量记「已经处理过了」。
+实际上现在**一个变量都没有**：连「日期先落进变量再取 `.Time`」那条也试过了，
+真机上照样卡在选择器里、闹钟还没名字（见下一节），所以改成了格式化文本。
 
-唯一的例外是 `WAKE_VAR`（`排班时间`）：`Add Alarm` 的 `dateComponents`
-必须取变量的 `.Time` 属性 —— 直接把日期动作的输出塞进去，iOS 26 认不出来，
-会卡在一个要求手动选日期的弹窗里，不填就中止（2026-11-12 用户原话
-「会一直卡死在一个弹窗，需要用户手动输入日期才可以创建」）。
-这个变量写和读都紧挨着 `Add Alarm`、在同一个块里，不跨块，所以安全。
-测试 `test_only_one_variable_and_it_is_for_the_alarm_time` 与
-`test_alarm_time_comes_from_the_variable` 守着这条线。
+## 新建闹钟的时刻为什么是"格式化出来的 HH:mm"
+`Add Alarm` 的 `dateComponents` 在 App Intent 里是 `WFDateFieldParameter`，
+按 shortcutkit 的 `encoding-table.json`，它只有 `WFTextTokenString` 一种合法编码，
+附件可以是 `ActionOutput` / `Variable` / 纯文本。所以"点开选择器让你手填"
+不是类型写错，而是**附件里那个值 iOS 26 解析不出来**。
+
+2026-11-12 真机连续踩了三版：
+1. 直接引用「日期」动作的输出 → 卡在要求手动选日期的弹窗；
+2. 先 `Set Variable` 存起来、再取变量的 `.Time` 属性 → 一样卡，且闹钟没名字；
+3. 现在这版：用「格式化日期」（`WFDateFormatStyle: Custom`、`WFDateFormat: HH:mm`）
+   把时刻拍成 `"07:45"` 这样的文本，再把这个**文本**交给 `dateComponents`。
+
+理由是闹钟只认时刻（几点几分），不需要整串日期，也就绕开了 `.Time`
+这个版本差异最大的属性访问器。测试 `test_alarm_time_is_formatted_hhmm_text`
+和 `test_no_variables_at_all` 守着这条线。
 
 ## 为什么标签里要带时间
 可用的只有「查找 / 开关 / 添加」三个动作，改不了已存在闹钟的时间，

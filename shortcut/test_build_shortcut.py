@@ -422,36 +422,41 @@ class SelectionLogic(unittest.TestCase):
         self.assertIn((1, str(build_shortcut.DAY_SECONDS)), conds)   # 小于等于 86400
         self.assertEqual(build_shortcut.DAY_SECONDS, 24 * 3600)
 
-    def test_only_one_variable_and_it_is_for_the_alarm_time(self):
-        """全文件只允许一个 Set Variable：给「添加闹钟」的日期用。
+    def test_no_variables_at_all(self):
+        """全程不用变量。
 
-        2026-11-12 真机实测两件事：
-        ① Set Variable 在 Repeat/If 块里写、块外读会得到空值，所以不能用它
-           记「已完成」这类跨块状态（见 test_loop_decides_by_label）；
-        ② 但 dateComponents 又必须经由变量取 .Time，直接把动作输出塞进去会让
-           iOS 弹「请选日期」并卡死（用户原话「会一直卡死在一个弹窗」）。
-        所以只保留这一个变量，且必须紧挨着「添加闹钟」之前。
+        2026-11-12 真机实测：Set Variable 在 Repeat/If 块里写、块外读会得到空值，
+        所以「已完成」这类跨块状态不能用。同一轮还试过「日期落进变量再取 .Time
+        塞给 Add Alarm」，真机上仍卡在选择器里、闹钟没名字，于是连这唯一的变量
+        也去掉了，改成把「格式化日期」的 HH:mm 文本直接交给 dateComponents。
         """
-        sets = [a for a in self.actions
-                if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.setvariable"]
-        self.assertEqual(len(sets), 1, "只允许为闹钟日期保留一个变量")
-        self.assertEqual(params(sets[0])["WFVariableName"],
-                         build_shortcut.WAKE_VAR)
-        appended = [a for a in self.actions if a["WFWorkflowActionIdentifier"] ==
-                    "is.workflow.actions.appendvariable"]
-        self.assertEqual(appended, [], "不要用 Add to Variable")
+        for ident in ("is.workflow.actions.setvariable",
+                      "is.workflow.actions.appendvariable"):
+            self.assertEqual(
+                [a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == ident], [],
+                "不要用变量，块内写块外读会得到空值")
 
-    def test_alarm_time_comes_from_the_variable(self):
-        """dateComponents 必须取变量的 .Time，而不是直接引用日期动作。"""
+    def test_alarm_time_is_formatted_hhmm_text(self):
+        """dateComponents 传的是「格式化日期」出来的 HH:mm 文本，不是 .Time 属性。"""
         create = [a for a in self.actions
                   if a["WFWorkflowActionIdentifier"] == A.CLOCK_ADD_ALARM][0]
         body = params(create)["dateComponents"]["Value"]["attachmentsByRange"]
         (att,) = body.values()
-        self.assertEqual(att["Type"], "Variable")
-        self.assertEqual(att["VariableName"], build_shortcut.WAKE_VAR)
-        self.assertEqual(att["Aggrandizements"],
-                         [{"PropertyName": "Time",
-                           "Type": "WFPropertyVariableAggrandizement"}])
+        self.assertEqual(att["Type"], "ActionOutput",
+                         "要直接引用「格式化日期」动作的输出，不再经过变量")
+        self.assertEqual(att["OutputName"], "响铃时刻")
+        self.assertNotIn("Aggrandizements", att,
+                         "不要再取 .Time 属性，那条路真机卡在选择器里")
+        # 被引用的动作必须是「格式化日期」，且格式串是 HH:mm
+        fmt = [a for a in self.actions
+               if a["WFWorkflowActionIdentifier"] == A.FORMAT_DATE]
+        self.assertEqual(len(fmt), 1, "正式版只有一个「格式化日期」")
+        p = params(fmt[0])
+        self.assertEqual(p["WFDateFormat"], "HH:mm")
+        self.assertEqual(p["WFDateFormatStyle"], "Custom")
+        self.assertEqual(p["WFTimeFormatStyle"], "None")
+        self.assertEqual(att["OutputUUID"], p["UUID"])
 
     def test_only_earliest_shift_is_handled(self):
         """一天里两条班次都落在窗口内时，只处理最早那条，避免建出一堆闹钟。"""

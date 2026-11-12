@@ -37,12 +37,13 @@
 为什么不用 Delete：
   删除必须弹确认框要用户点；关闭（Toggle）不需要，静默生效。
 
-为什么全程不用变量，却留了一个 Set Variable：
+为什么一个变量都不用：
   iOS 26 上 Set Variable 在 Repeat/If 块里写、块外读会得到**空值**，
   所以「已完成」这类跨块状态一概不能用（2026-11-12 真机踩过：标志读到空，
-  循环体整段被跳过，还完全不报错）。但新建闹钟的 dateComponents 又必须经由
-  变量取 .Time —— 直接塞日期动作的输出，iOS 会弹「请选日期」并卡死。
-  因此只保留 WAKE_VAR 这一个变量，写和读都紧挨着「添加闹钟」同一块内。
+  循环体整段被跳过，还完全不报错）。反过来，块内写完立刻在块内读是可靠的，
+  但 2026-11-12 试过「日期先落进变量、再取 .Time 塞给 Add Alarm」，
+  真机上仍然卡在选择器里、闹钟还没名字，所以那条路也放弃了，
+  改成「格式化日期成 HH:mm 文本」直接当 dateComponents（见第 4 段注释）。
 
 shortcutkit 目录查出来、之前手写 plist 写错的几处（别再改回去）：
   · MTCreateAlarmIntent 的真实参数只有 dateComponents / name / repeats /
@@ -138,10 +139,6 @@ def add_alarm(s, date_components, name):
     params["repeatSchedule"] = {"displayString": "Never", "value": 0}
     params["ShowWhenRun"] = False
     return _override_descriptor(action, "CreateAlarmIntent")
-
-# 新建闹钟时，日期必须先落进这个变量再用它的 .Time（见第 4 段的说明）。
-# 这是全文件唯一允许使用变量的地方，而且只在同一个代码块内写读。
-WAKE_VAR = "排班时间"
 
 LOGGER = "日志"            # debug 版的累积变量名
 
@@ -397,18 +394,24 @@ def build_main(debug=False):
     s.end_repeat_each(each_alarm)
 
     # ── 4. 时钟里没有同名闹钟（循环没提前结束）才新建 ──────────────────────
-    # 日期必须先落进变量、再用变量的 .Time：这里**必须**用一次 Set Variable。
-    # 2026-11-12 真机踩过：直接把「日期」动作的输出塞进 dateComponents，
-    # iOS 26 认不出来，会卡在一个要求手动选日期的弹窗里，不填就中止
-    # （原话「会一直卡死在一个弹窗，需要用户手动输入日期才可以创建」）。
-    # 这个变量是在同一个代码块里写、同一个代码块里紧接着读，不跨块，
-    # 所以不会碰上「块内写的变量块外读到空」那个坑。
+    # dateComponents 的类型是 DateTimeComponents（App Intent 里编码成
+    # WFDateFieldParameter）。按 shortcutkit 的 encoding-table.json，它的合法
+    # 编码只有 WFTextTokenString 一种 …\ufffc 附件，附件可以是 ActionOutput /
+    # Variable / 纯文本。所以「点开选择器让你手填」不是类型写错，而是附件里
+    # 那个值 iOS 26 解析不出来。
+    # 2026-11-12 真机踩过两种都失败：
+    #   ① 直接引用「日期」动作输出 → 卡在要求手动选日期；
+    #   ② 存进变量再取 .Time 属性 → 一样卡住，而且闹钟没名字。
+    # 现在改成第三種：先用「格式化日期」把时刻拍成 "HH:mm" 文本，
+    # 再把这段**文本**交给 dateComponents。闹钟只认时刻（几点几分），
+    # 不需要整串日期，所以不必依赖 .Time 属性访问器 —— 那是版本差异最大的一环。
     # 不传 repeats 就是「不重复」（枚举里没有「永不」，传了反而报参数错）。
-    s.action(A.SETVARIABLE, WFInput=ref(when), WFVariableName=WAKE_VAR)
-    alarm_time = sk.variable(WAKE_VAR)
-    alarm_time["Value"]["Aggrandizements"] = [
-        {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}]
-    add_alarm(s, sk.text(alarm_time), sk.text(ref(target)))
+    alarm_hhmm = act(s, A.FORMAT_DATE, "响铃时刻",
+                     WFDate=sk.text(ref(when)),
+                     WFDateFormatStyle="Custom",
+                     WFDateFormat="HH:mm",
+                     WFTimeFormatStyle="None")
+    add_alarm(s, sk.text(ref(alarm_hhmm)), sk.text(ref(target)))
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody=merge("已建闹钟：", sk.text(ref(target))))
