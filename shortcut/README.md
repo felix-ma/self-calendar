@@ -42,7 +42,7 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 | 2 | `alarms[]` 条数 | 0 = 清单是空的 |
 | 3 | 每条的 `at` 与「距今多少秒」 | 负数 = 已过；> 86400 = 超过一天 |
 | 4 | 窗口内的班次：闹钟名与响铃时间 | 标签和时间算得对不对 |
-| 6 | 时钟里闹钟数量（带过滤/不带过滤） | 两个数不同 = 过滤有效；都是 0 = 读不到闹钟；都等于 N = 过滤被忽略 |
+| 6 | 时钟里的全部闹钟 label | 连成一串；看不到「排班·…」= 读不到 label 或闹钟不存在 |
 | 7 | 每个闹钟的 label | 能不能读到标签 |
 | 8/9 | 同名打开 / 旧闹钟关掉 | 走的是哪个分支 |
 | 10/11 | 已新建 / 未新建 | 最终有没有真正建出来 |
@@ -68,11 +68,10 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 | --- | --- |
 | `Add Alarm` 传了 `label`、`repeatSchedule` | 真机报「请为此操作中的每个参数选取值，然后终止了」 |
 | `repeats` 传 `"Never"` | 枚举里只有 sunday…saturday，传了就是非法值；不传才是"不重复" |
-| descriptor 照抄目录的 `com.apple.clock` | Find Alarms 的过滤被静默忽略（见下），筛出全部闹钟 |
 | 引用名和动作实际输出名不一致 | 编辑器显示「未知变量」 |
 | `WFNumberValue` 写成整数 | 数字比较永远为假（见下） |
 | 读实体属性的 aggrandizement 漏了 `PropertyUserInfo` | 把属性名当字面量输出（断点里显示成英文单词 `label`），条件恒假 |
-| `sk.where()` 生成文本过滤行（缺 `Values.Unit`） | 过滤被静默忽略，筛出全部闹钟 |
+| 指望 Find Alarms 的过滤条件 | iOS 26 直接无视它，永远返回全部闹钟（见下） |
 
 **`WFNumberValue` 必须是字符串。** shortcutkit 的 `if_()` 把数值比较的值
 写成 Python 整数，plist 里是 `<integer>`；而 iOS 真实存的都是字符串
@@ -90,22 +89,22 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 2026-11-12 真机断点里就显示成英文单词 `label`，于是"含「排班」"恒为假，
 每个闹钟都走了"旧的、关掉"分支。测试 `test_alarm_label_reads_entity_property` 会拦。
 
-**按 `label` 筛闹钟的过滤行要带 `Values.Unit: 4`。** `sk.where()` 给文本行只写
-`Values: {String: ...}`，iOS 的闹钟文本过滤还要一个 `Unit: 4`（vergenzt 参考实现
-里就是 `Values: {String: '🗓️', Unit: 4}`）。少了它整个过滤被静默忽略 ——
-真机断点里"带排班过滤 8 个 / 不带过滤 8 个"两个数一模一样，于是把自己该新建的
-闹钟也当成"同名已存在"，一个都不建。所以生成器改用自写的 `label_filter()`，
-测试 `test_label_filter_has_unit` 会拦。
+**不要给 Find Alarms 加过滤条件。** 2026-11-12 在 iOS 26 真机上反复验证：
+`WFContentItemFilter` 被完全忽略 —— 带过滤「排班」8 个、不带过滤还是 8 个。
+中间试过两轮补救都没用：给文本行补 `Values.Unit: 4`、把 descriptor 换成
+`AlarmEntity` + `com.apple.mobiletimer`（真机验证能用的那份）。结论是这个动作
+在 iOS 26 上只按 `WFContentItemInputParameter` 返回全部闹钟。
 
-**Find Alarms 的 `AppIntentDescriptor` 不能用目录自动生成的那份。** shortcutkit
-按 Shortcuts 10.0 的目录给的是 `AppIntentIdentifier: MTGetAlarmsIntent` +
-`BundleIdentifier: com.apple.clock`。这套动作能跑、也能取到闹钟，但
-`WFContentItemFilter` 会被整体忽略 —— 2026-11-12 真机断点里"带排班过滤 8 个 /
-不带过滤 8 个"两个数一模一样，就是它，跟 `Values.Unit` 缺失是两个独立的坑。
-真机上真正生效的写法（`vergenzt/shortcuts` 里三份实现全部如此）是
-`AppIntentIdentifier: "AlarmEntity"` + `BundleIdentifier: "com.apple.mobiletimer"`。
-所以生成器用 `find_alarms()` 统一覆盖 descriptor，Toggle / Add 也归到
-`com.apple.mobiletimer`；测试 `test_clock_descriptors` 会拦。
+所以生成器现在的做法是：**取全部闹钟，在循环里用 `label` 自己判断**。
+- `label` 含「排班」→ 是我们管的闹钟；
+- 再判断是否等于本次的目标标签（`排班·早班 07:45` 这种）：
+  - 等于 → 打开它（可能之前被关过），然后 **`A.EXIT` 停止整个快捷指令** ——
+    用「提前收工」代替「记住找到过」的变量，因为变量跨块读不到；
+  - 不等于 → 关掉它（Toggle，不删、不弹窗），继续看下一个。
+- 循环自然结束 = 没找到同名 → 新建。
+
+测试 `test_find_alarms_has_input_and_no_filter`（不许带过滤）与
+`test_loop_decides_by_label`（必须有 `A.EXIT` + contains/is 两个条件）会拦。
 
 **签名仍走 `playground.cherrilang.org`**：shortcutkit 的 `sign()` 是 `subprocess`
 调 macOS 的 `shortcuts sign` CLI，Linux 上跑不了；`sign.py` 改用远程签名服务，

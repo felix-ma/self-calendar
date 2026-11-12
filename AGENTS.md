@@ -86,12 +86,14 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   **读闹钟 `label` 必须带 `PropertyUserInfo`**（`WFPropertyVariableAggrandizement`
   里写 `WFLinkEntityContentPropertyUserInfoPropertyIdentifier: "label"`）；
   少了它 iOS 把属性名当字面量输出，断点里显示成英文单词 `label`，条件恒假。
-  **按 `label` 筛闹钟必须用 `label_filter()`**，文本行的 `Values` 要带 `Unit: 4`；
-  `sk.where()` 生成的行缺它，过滤被静默忽略（真机表现为「带过滤 N 个 = 不带过滤 N 个」）。
-  **Find Alarms 的 `AppIntentDescriptor` 必须用 `find_alarms()` 覆盖**成
-  `AppIntentIdentifier: "AlarmEntity"` + `BundleIdentifier: "com.apple.mobiletimer"`；
-  shortcutkit 目录自动写的 `MTGetAlarmsIntent` + `com.apple.clock` 会让过滤整体失效
-  （2026-11-12 真机踩过，两个数都是 8）。Toggle / Add 同样归到 `com.apple.mobiletimer`。
+  **Find Alarms 不要传 `WFContentItemFilter`**：iOS 26 上它被完全忽略
+  （2026-11-12 真机反复验证，带过滤 8 个、不带过滤还是 8 个；补 `Values.Unit: 4`、
+  换 `AlarmEntity` descriptor 都没用）。只给 `WFContentItemInputParameter: "Library"`
+  取全部闹钟，筛选放到循环里用 `label` 判断。
+  **找到了就收工用「停止这个快捷指令」（`A.EXIT`）**，不要用变量记状态。
+  Find 的 `AppIntentDescriptor` 仍用 `find_alarms()` 覆盖成
+  `AppIntentIdentifier: "AlarmEntity"` + `BundleIdentifier: "com.apple.mobiletimer"`
+  （真机验证可用的那份）；Toggle / Add 同样归到 `com.apple.mobiletimer`。
   **不要用 `Update Alarm`**：它是 iOS 27 才有的动作，iOS 26 导入时被静默丢弃，
   会出现「什么都没发生也不报错」（真机踩过）；只用 `com.apple.mobiletimer-framework`
   的 Find / Toggle / Add 三个动作。
@@ -143,7 +145,7 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 测的是 `shortcut/build_shortcut.py` 产出的 plist 结构：根键、块配对、
 引用名与输出名一致、`WFNumberValue` 必须是字符串、Add Alarm 不带
 `label`/`repeatSchedule`、descriptor 用 `com.apple.mobiletimer`、24 小时窗口
-两个数值条件、挑到就停手、没挑到只提示。
+两个数值条件、Find Alarms 不带过滤、找到同名用 `A.EXIT` 收工、全程不用变量。
 
 **改生成器必须跑它**，每个用例的 docstring 写着它对应哪次真机事故。
 它拦不住 iOS 的运行时语义（条件在真机上算成真还是假、某动作在某版本

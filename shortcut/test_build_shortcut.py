@@ -186,35 +186,34 @@ class GeneratedShortcut(unittest.TestCase):
             self.assertIsInstance(p["state"], bool)
         self.assertEqual({params(t)["state"] for t in toggles}, {True, False})
 
-    def test_find_alarms_has_input_and_filter(self):
-        """每次 Find Alarms 都要给数据源和过滤器，否则等于没选值。
+    def test_find_alarms_has_input_and_no_filter(self):
+        """只查一次全部闹钟，并且明确**不带**过滤条件。
 
-        现在有两处查找：① 列出所有「排班」闹钟（contains 99）；
-        ② 按目标标签精确找同名闹钟（is 4）。两处的过滤值都必须齐全。
+        事故（2026-11-12）：iOS 26 上 Find Alarms 完全无视
+        WFContentItemFilter —— 带过滤 8 个、不带过滤还是 8 个（换
+        AlarmEntity descriptor 也一样）。既然过滤不起作用，就不要带上，
+        免得以后有人以为它在生效、把判断逻辑写错。
+        判断改在循环里用 label 做，见 test_loop_decides_by_label。
         """
         finds = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
-        self.assertEqual(len(finds), 2)
-        operators = []
-        for find in finds:
-            p = params(find)
-            self.assertEqual(p["WFContentItemInputParameter"], "Library")
-            templates = p["WFContentItemFilter"]["Value"]["WFActionParameterFilterTemplates"]
-            self.assertEqual(len(templates), 1)
-            self.assertEqual(templates[0]["Property"], "label")   # 小写
-            self.assertTrue(templates[0]["Values"]["String"], "过滤值不能为空")
-            operators.append(templates[0]["Operator"])
-        self.assertEqual(operators, [99, 4])                      # contains / is
+        self.assertEqual(len(finds), 1)
+        p = params(finds[0])
+        self.assertEqual(p["WFContentItemInputParameter"], "Library")
+        self.assertNotIn("WFContentItemFilter", p,
+                         "iOS 26 不认这个过滤，带上只会误导")
 
-    def test_filter_can_reference_action_output(self):
-        """同名判断用动作输出当过滤值，不靠变量（变量跨块会读到空）。"""
-        finds = [a for a in self.actions
-                 if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
-        exact = params(finds[-1])["WFContentItemFilter"]["Value"][
-            "WFActionParameterFilterTemplates"][0]["Values"]["String"]
-        self.assertEqual(exact["WFSerializationType"], "WFTextTokenString")
-        self.assertTrue(exact["Value"]["attachmentsByRange"],
-                        "精确查找的标签必须是动作输出，不能是写死的文本")
+    def test_loop_decides_by_label(self):
+        """同名就打开并提前收工；不是它就关掉。"""
+        self.assertEqual(
+            len([a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == A.EXIT]), 1,
+            "找到同名闹钟后必须用「停止这个快捷指令」收工，不能靠变量记状态")
+        conds = [a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.conditional"]
+        operators = [params(c).get("WFCondition") for c in conds]
+        self.assertIn(99, operators, "要用 contains 判断「是不是排班闹钟」")
+        self.assertIn(4, operators, "要用 is 判断「是不是同名」")
 
     def test_alarm_label_reads_entity_property(self):
         """读闹钟 label 要两层 aggrandizement，少第一层读到空值。"""
@@ -261,23 +260,6 @@ class GeneratedShortcut(unittest.TestCase):
                         "WFLinkEntityContentPropertyUserInfoPropertyIdentifier"),
                     "label",
                     "WFPropertyVariableAggrandizement 必须带 PropertyUserInfo")
-
-    def test_label_filter_has_unit(self):
-        """按 label 筛闹钟的文本行必须带 Unit: 4。
-
-        事故（2026-11-12）：sk.where() 只写 Values.String，缺 Unit，iOS 静默忽略
-        整个过滤条件 —— 真机断点里「带排班过滤 8 个 / 不带过滤 8 个」两个数一样，
-        结果把它自己建的闹钟也当成「同名已存在」，一个都不新建。
-        """
-        finds = [a for a in self.actions
-                 if a["WFWorkflowActionIdentifier"] == A.CLOCK_FIND_ALARMS]
-        self.assertTrue(finds)
-        for find in finds:
-            row = params(find)["WFContentItemFilter"]["Value"][
-                "WFActionParameterFilterTemplates"][0]
-            self.assertEqual(row["Values"].get("Unit"), 4,
-                             "文本过滤行的 Values 必须有 Unit: 4")
-
 
 class Diagnostics(unittest.TestCase):
     """诊断版（--debug）。日志本身也可能写成坏结构，这里一并测。"""

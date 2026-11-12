@@ -186,32 +186,18 @@ def alarm_label(attachment):
                                    "label"}}]}}
 
 
-def label_filter(operator, value):
-    """手工拼「按 label 筛闹钟」的过滤条件。
+def find_alarms(s, name):
+    """加一个 Find Alarms：取时钟里的全部闹钟。
 
-    不用 sk.where()：它给文本行只写 `Values: {String: ...}`，而 iOS 的闹钟文本
-    过滤还要一个 `Unit: 4`（参考实现 vergenzt/shortcuts 里就是这么写的）。少了
-    它过滤被静默忽略 —— 2026-11-12 真机断点里「带排班过滤 8 个 / 不带过滤 8 个」
-    两个数一样，就是这个原因。
-    """
-    return {"WFSerializationType": "WFContentPredicateTableTemplate",
-            "Value": {"WFActionParameterFilterPrefix": 1,
-                      "WFContentPredicateBoundedDate": False,
-                      "WFActionParameterFilterTemplates": [
-                          {"Property": "label", "Operator": operator,
-                           "Removable": True,
-                           "Values": {"String": value, "Unit": 4}}]}}
+    **不要传 WFContentItemFilter。** 2026-11-12 真机反复验证：iOS 26 上
+    Find Alarms 完全无视过滤条件（带过滤 8 个、不带过滤还是 8 个；把
+    descriptor 换成 AlarmEntity + com.apple.mobiletimer 也一样），只按
+    WFContentItemInputParameter 返回全部闹钟。所以这里只给数据源，
+    筛选一律放到循环里用 label 判断。
 
-
-def find_alarms(s, name, filter_=None):
-    """加一个 Find Alarms，并把 descriptor 换成真机上过滤生效的那份。
-
-    shortcutkit 会按目录自动写 descriptor，但那组合让 WFContentItemFilter 失效
-    （见 ALARM_ENTITY_DESCRIPTOR 的注释），所以这里生成完再覆盖掉。
+    descriptor 仍然覆盖成真机验证过的那份（见 ALARM_ENTITY_DESCRIPTOR）。
     """
     params = {"WFContentItemInputParameter": "Library"}
-    if filter_ is not None:
-        params["WFContentItemFilter"] = filter_
     action = act(s, A.CLOCK_FIND_ALARMS, name, **params)
     action["WFWorkflowActionParameters"]["AppIntentDescriptor"] = dict(
         ALARM_ENTITY_DESCRIPTOR)
@@ -344,28 +330,28 @@ def build_main(debug=False):
     stop("窗口内的班次：闹钟名与响铃时间",
          sk.text(ref(target), "\n响铃 ", sk.property_(ref(when), "Time")))
 
-    # ── 3. 这个班次的闹钟：同名打开、其余「排班」关掉 ──────────────────────
-    alarms = find_alarms(s, "闹钟", label_filter(99, LABEL))
+    # ── 3. 这个班次的闹钟：同名就打开并收工，其余的「排班」关掉 ───────────
+    # 这里**不用过滤**：2026-11-12 真机验证，iOS 26 上 Find Alarms 完全无视
+    # WFContentItemFilter（换 AlarmEntity descriptor 也一样，带过滤 8 个、
+    # 不带过滤还是 8 个），只会按 WFContentItemInputParameter 返回全部闹钟。
+    # 所以取全部、在循环里用 label 自己判断。
+    alarms = find_alarms(s, "全部闹钟")
 
     if debug:
-        count_alarm = act(s, A.COUNT, "闹钟条数", Input=ref(alarms),
-                          WFCountType="Items")
-        all_alarms = find_alarms(s, "全部闹钟")
-        count_all_alarm = act(s, A.COUNT, "全部闹钟条数", Input=ref(all_alarms),
-                              WFCountType="Items")
-        stop("时钟里的闹钟数量",
-             sk.text("带「排班」过滤：", ref(count_alarm),
-                     " 个\n不带过滤：", ref(count_all_alarm), " 个\n\n",
-                     "两个数不同 → 过滤有效\n都为 0 → 读不到闹钟"))
+        labels = act(s, A.DETECT_TEXT, "全部闹钟文本", WFInput=ref(alarms))
+        stop("时钟里的全部闹钟（label 连成一串）",
+             "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(labels)))
 
     each_alarm = s.repeat_each(ref(alarms))
-    stop("时钟里的闹钟 label", sk.text(alarm_label(sk.repeat_item())))
     mine = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
     same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(ref(target)))
 
-    stop("同名闹钟：将打开它", sk.text(ref(target)))
+    stop("同名闹钟：将打开它并结束", sk.text(ref(target)))
     # 同名闹钟：确保它是开着的（可能是之前关掉的）
     toggle(s, sk.repeat_item(), True)
+    # 找到了就收工，别在循环外再建一个新的 —— 用「停止这个快捷指令」代替
+    # 「记住找到过」的变量（变量跨块读不到，见文件顶部说明）。
+    s.action(A.EXIT)
 
     s.otherwise(same)
     stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
@@ -376,11 +362,7 @@ def build_main(debug=False):
     s.end_if(mine)
     s.end_repeat_each(each_alarm)
 
-    # ── 4. 时钟里没有同名闹钟才新建 ────────────────────────────────────────
-    existing = find_alarms(s, "同名闹钟", label_filter(4, sk.text(ref(target))))
-    found = act(s, A.COUNT, "同名闹钟条数", Input=ref(existing), WFCountType="Items")
-
-    missing = num_if(s, ref(found), "less_or_equal", 0)
+    # ── 4. 时钟里没有同名闹钟（循环没提前结束）才新建 ──────────────────────
     # 取日期的 .Time 属性：闹钟只要「时:分」。不传 repeats 就是「不重复」
     # （枚举里没有「永不」，传了反而报参数错）。
     add_alarm(s, sk.text(sk.property_(ref(when), "Time")), sk.text(ref(target)))
@@ -388,9 +370,6 @@ def build_main(debug=False):
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody=merge("已建闹钟：", sk.text(ref(target))))
     stop("已新建闹钟", sk.text(ref(target)))
-    s.end_if(missing)
-
-    stop("已有同名闹钟，未新建", sk.text(ref(target)), "\n", ref(found), " 个")
 
     s.end_if(soon)
     s.end_if(future)
