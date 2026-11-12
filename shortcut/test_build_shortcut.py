@@ -416,19 +416,36 @@ class SelectionLogic(unittest.TestCase):
         self.assertIn((1, str(build_shortcut.DAY_SECONDS)), conds)   # 小于等于 86400
         self.assertEqual(build_shortcut.DAY_SECONDS, 24 * 3600)
 
-    def test_no_variables_at_all(self):
-        """一个 Set Variable 都不许有。
+    def test_only_one_variable_and_it_is_for_the_alarm_time(self):
+        """全文件只允许一个 Set Variable：给「添加闹钟」的日期用。
 
-        2026-11-12 真机实测：iOS 26 上 Set Variable 写的变量在 Repeat/If
-        块里写、块外读会得到空值。旧的「已完成」标志因此永远是空 → 循环体
-        整段被跳过 → 一条班次都挑不到，还不报错。所以整套逻辑只用动作输出
-        当引用，不用任何变量。
+        2026-11-12 真机实测两件事：
+        ① Set Variable 在 Repeat/If 块里写、块外读会得到空值，所以不能用它
+           记「已完成」这类跨块状态（见 test_loop_decides_by_label）；
+        ② 但 dateComponents 又必须经由变量取 .Time，直接把动作输出塞进去会让
+           iOS 弹「请选日期」并卡死（用户原话「会一直卡死在一个弹窗」）。
+        所以只保留这一个变量，且必须紧挨着「添加闹钟」之前。
         """
-        used = [a for a in self.actions
-                if a["WFWorkflowActionIdentifier"] in
-                ("is.workflow.actions.setvariable",
-                 "is.workflow.actions.appendvariable")]
-        self.assertEqual(used, [], "不要在快捷指令里用变量，改用动作输出")
+        sets = [a for a in self.actions
+                if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.setvariable"]
+        self.assertEqual(len(sets), 1, "只允许为闹钟日期保留一个变量")
+        self.assertEqual(params(sets[0])["WFVariableName"],
+                         build_shortcut.WAKE_VAR)
+        appended = [a for a in self.actions if a["WFWorkflowActionIdentifier"] ==
+                    "is.workflow.actions.appendvariable"]
+        self.assertEqual(appended, [], "不要用 Add to Variable")
+
+    def test_alarm_time_comes_from_the_variable(self):
+        """dateComponents 必须取变量的 .Time，而不是直接引用日期动作。"""
+        create = [a for a in self.actions
+                  if a["WFWorkflowActionIdentifier"] == A.CLOCK_ADD_ALARM][0]
+        body = params(create)["dateComponents"]["Value"]["attachmentsByRange"]
+        (att,) = body.values()
+        self.assertEqual(att["Type"], "Variable")
+        self.assertEqual(att["VariableName"], build_shortcut.WAKE_VAR)
+        self.assertEqual(att["Aggrandizements"],
+                         [{"PropertyName": "Time",
+                           "Type": "WFPropertyVariableAggrandizement"}])
 
     def test_only_earliest_shift_is_handled(self):
         """一天里两条班次都落在窗口内时，只处理最早那条，避免建出一堆闹钟。"""

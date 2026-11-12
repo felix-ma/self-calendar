@@ -37,13 +37,22 @@
 为什么不用 Delete：
   删除必须弹确认框要用户点；关闭（Toggle）不需要，静默生效。
 
+为什么全程不用变量，却留了一个 Set Variable：
+  iOS 26 上 Set Variable 在 Repeat/If 块里写、块外读会得到**空值**，
+  所以「已完成」这类跨块状态一概不能用（2026-11-12 真机踩过：标志读到空，
+  循环体整段被跳过，还完全不报错）。但新建闹钟的 dateComponents 又必须经由
+  变量取 .Time —— 直接塞日期动作的输出，iOS 会弹「请选日期」并卡死。
+  因此只保留 WAKE_VAR 这一个变量，写和读都紧挨着「添加闹钟」同一块内。
+
 shortcutkit 目录查出来、之前手写 plist 写错的几处（别再改回去）：
   · MTCreateAlarmIntent 的真实参数只有 dateComponents / name / repeats /
     allowsSnooze / OpenWhenRun，**没有 label、没有 repeatSchedule**。
     以前多传的这两个无效键，就是真机报「请为此操作中的每个参数选取值」的元凶。
   · repeats 的可选值只有 sunday..saturday，没有「永不」→ 不重复就**整个不传**。
-  · 三个闹钟动作的 AppIntentDescriptor 都用 com.apple.clock（不是 com.apple.mobiletimer），
-    AppIntentIdentifier 分别是 CreateAlarmIntent / MTGetAlarmsIntent / ToggleAlarmIntent。
+  · 三个闹钟动作的 AppIntentDescriptor 要用 com.apple.mobiletimer（不是目录里
+    写的 com.apple.clock），AppIntentIdentifier 分别是 CreateAlarmIntent /
+    AlarmEntity / ToggleAlarmIntent；Find Alarms 还必须用 find_alarms() 覆盖，
+    否则 WFContentItemFilter 会被静默忽略。
   · Toggle 必须带 alarm + operation("turn") + state(0/1)。
   · 从闹钟实体读 label 要两层 aggrandizement：先转成 AlarmEntity，再取 label 属性。
 """
@@ -119,6 +128,10 @@ def add_alarm(s, date_components, name):
     action = s.action(A.CLOCK_ADD_ALARM, dateComponents=date_components,
                       name=name, allowsSnooze=True)
     return _override_descriptor(action, "CreateAlarmIntent")
+
+# 新建闹钟时，日期必须先落进这个变量再用它的 .Time（见第 4 段的说明）。
+# 这是全文件唯一允许使用变量的地方，而且只在同一个代码块内写读。
+WAKE_VAR = "排班时间"
 
 LOGGER = "日志"            # debug 版的累积变量名
 
@@ -332,8 +345,14 @@ def build_main(debug=False):
                WFGetDictionaryValueType="Value", WFDictionaryKey="time")
     # 目标标签 = 「排班·早班 07:45」，既是闹钟名，也是「同一个闹钟」的判据
     target = act(s, A.GETTEXT, "目标标签", WFTextActionText=sk.text(ref(named), " ", ref(hhmm)))
-    stop("窗口内的班次：闹钟名与响铃时间",
-         sk.text(ref(target), "\n响铃 ", sk.property_(ref(when), "Time")))
+    if debug:
+        # 直接把 .Time 属性塞进弹窗会印出自己的 aggrandizement 结构（用户反馈
+        # 「显示的很奇怪」），所以先格式化成人能读的「07:45」再显示。
+        pretty = act(s, A.FORMAT_DATE, "响铃时间",
+                     WFDate=sk.text(ref(at)), WFDateFormatStyle="Custom",
+                     WFDateFormat="HH:mm", WFTimeFormatStyle="None")
+        stop("窗口内的班次：闹钟名与响铃时间",
+             sk.text(ref(target), "\n响铃 ", ref(pretty), "（at=", ref(at), "）"))
 
     # ── 3. 这个班次的闹钟：同名就打开并收工，其余的「排班」关掉 ───────────
     # 这里**不用过滤**：2026-11-12 真机验证，iOS 26 上 Find Alarms 完全无视
@@ -368,9 +387,18 @@ def build_main(debug=False):
     s.end_repeat_each(each_alarm)
 
     # ── 4. 时钟里没有同名闹钟（循环没提前结束）才新建 ──────────────────────
-    # 取日期的 .Time 属性：闹钟只要「时:分」。不传 repeats 就是「不重复」
-    # （枚举里没有「永不」，传了反而报参数错）。
-    add_alarm(s, sk.text(sk.property_(ref(when), "Time")), sk.text(ref(target)))
+    # 日期必须先落进变量、再用变量的 .Time：这里**必须**用一次 Set Variable。
+    # 2026-11-12 真机踩过：直接把「日期」动作的输出塞进 dateComponents，
+    # iOS 26 认不出来，会卡在一个要求手动选日期的弹窗里，不填就中止
+    # （原话「会一直卡死在一个弹窗，需要用户手动输入日期才可以创建」）。
+    # 这个变量是在同一个代码块里写、同一个代码块里紧接着读，不跨块，
+    # 所以不会碰上「块内写的变量块外读到空」那个坑。
+    # 不传 repeats 就是「不重复」（枚举里没有「永不」，传了反而报参数错）。
+    s.action(A.SETVARIABLE, WFInput=ref(when), WFVariableName=WAKE_VAR)
+    alarm_time = sk.variable(WAKE_VAR)
+    alarm_time["Value"]["Aggrandizements"] = [
+        {"PropertyName": "Time", "Type": "WFPropertyVariableAggrandizement"}]
+    add_alarm(s, sk.text(alarm_time), sk.text(ref(target)))
     s.action(A.NOTIFICATION,
              WFNotificationActionTitle="排班闹钟",
              WFNotificationActionBody=merge("已建闹钟：", sk.text(ref(target))))
