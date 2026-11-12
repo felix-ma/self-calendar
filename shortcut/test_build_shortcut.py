@@ -207,8 +207,9 @@ class GeneratedShortcut(unittest.TestCase):
         """同名就打开并提前收工；不是它就关掉。"""
         self.assertEqual(
             len([a for a in self.actions
-                 if a["WFWorkflowActionIdentifier"] == A.EXIT]), 1,
-            "找到同名闹钟后必须用「停止这个快捷指令」收工，不能靠变量记状态")
+                 if a["WFWorkflowActionIdentifier"] == A.EXIT]), 2,
+            "找到同名、以及新建成功后，都要用「停止这个快捷指令」收工，"
+            "不能靠变量记状态，也不能接着处理后面的班次")
         conds = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.conditional"]
         operators = [params(c).get("WFCondition") for c in conds]
@@ -429,8 +430,8 @@ class SelectionLogic(unittest.TestCase):
                  "is.workflow.actions.appendvariable")]
         self.assertEqual(used, [], "不要在快捷指令里用变量，改用动作输出")
 
-    def test_each_shift_maintains_its_own_alarm(self):
-        """窗口内每条班次各自找闹钟、各自开关或新建（不再只挑第一条）。"""
+    def test_only_earliest_shift_is_handled(self):
+        """一天里两条班次都落在窗口内时，只处理最早那条，避免建出一堆闹钟。"""
         creates = [a for a in self.actions
                    if a["WFWorkflowActionIdentifier"] == A.CLOCK_ADD_ALARM]
         self.assertEqual(len(creates), 1)
@@ -440,6 +441,10 @@ class SelectionLogic(unittest.TestCase):
         notes = [a for a in self.actions
                  if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.notification"]
         self.assertEqual(len(notes), 1, "新建成功后提示一句")
+        self.assertEqual(
+            len([a for a in self.actions
+                 if a["WFWorkflowActionIdentifier"] == A.EXIT]), 2,
+            "新建成功后必须也收工，否则会把明天的班次也建出来")
 
 
 if __name__ == "__main__":
