@@ -361,39 +361,49 @@ def build_main(debug=False):
         stop("窗口内的班次：闹钟名与响铃时间",
              sk.text(ref(target), "\n响铃 ", ref(pretty), "（at=", ref(at), "）"))
 
-    # ── 3. 这个班次的闹钟：同名就打开并收工，其余的「排班」关掉 ───────────
+    # ── 3. 这个班次的闹钟：已经有了就收工，没有才建 ────────────────────────
     # 这里**不用过滤**：2026-11-12 真机验证，iOS 26 上 Find Alarms 完全无视
     # WFContentItemFilter（换 AlarmEntity descriptor 也一样，带过滤 8 个、
     # 不带过滤还是 8 个），只会按 WFContentItemInputParameter 返回全部闹钟。
     # 所以取全部、在循环里用 label 自己判断。
     alarms = find_alarms(s, "全部闹钟")
 
+    # 存在性判断**不看实体属性**，改成「把闹钟列表转成文本，看里面有没有目标标签」。
+    # 2026-11-12 iOS 15.4 真机踩过：靠 label 属性（两层 aggrandizement）判断在旧
+    # 系统上根本不成立 —— 每次都当「没有同名闹钟」处理，于是重复建出一堆闹钟。
+    # 文本包含判断只依赖「把闹钟转成文字」这一件事，跨版本都成立，
+    # 而且判断失误的后果是「不建」，不会像属性判断那样误判成「该建」。
+    alarm_text = act(s, A.DETECT_TEXT, "闹钟文本", WFInput=ref(alarms))
+
     if debug:
-        labels = act(s, A.DETECT_TEXT, "全部闹钟文本", WFInput=ref(alarms))
-        stop("时钟里的全部闹钟（label 连成一串）",
-             "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(labels)))
+        stop("时钟里的全部闹钟（转成文本）",
+             "共 ", sk.text(ref(alarms)), " 项：\n", sk.text(ref(alarm_text)))
 
-    each_alarm = s.repeat_each(ref(alarms))
-    mine = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
-    same = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(ref(target)))
+    found = s.if_(ref(alarm_text), "contains", sk.text(ref(target)))
 
-    stop("同名闹钟：将打开它并结束", sk.text(ref(target)))
-    # 同名闹钟：确保它是开着的（可能是之前关掉的）
+    # 已经有同名闹钟 → 确保它是开着的就行（可能是自己手动关掉的），然后收工。
+    each_same = s.repeat_each(ref(alarms))
+    mine = s.if_(alarm_label(sk.repeat_item()), "is", sk.text(ref(target)))
+    stop("同名闹钟已在：确保它开着", sk.text(ref(target)))
     toggle(s, sk.repeat_item(), True)
-    # 找到了就收工，别在循环外再建一个新的 —— 用「停止这个快捷指令」代替
-    # 「记住找到过」的变量（变量跨块读不到，见文件顶部说明）。
+    s.end_if(mine)
+    s.end_repeat_each(each_same)
+
+    # 已经维护好了，立刻收工，别再处理后面的班次（否则会把明天的也建出来）。
     s.action(A.EXIT)
 
-    s.otherwise(same)
-    stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
-    # 不是它：关掉这个旧的排班闹钟（Toggle：不删除、不弹窗）
-    toggle(s, sk.repeat_item(), False)
+    s.otherwise(found)
 
-    s.end_if(same)
-    s.end_if(mine)
+    # ── 4. 没有同名闹钟：先把旧的排班闹钟全关掉，再新建 ────────────────────
+    # 关旧只能用 label 属性判断（15.4 上这条判断不生效，最坏结果是旧闹钟没被关，
+    # 但不会再重复建 —— 因为「要不要建」已经由上面的文本判断决定了）。
+    each_alarm = s.repeat_each(ref(alarms))
+    stale = s.if_(alarm_label(sk.repeat_item()), "contains", LABEL)
+    stop("旧闹钟：将关掉它", sk.text(alarm_label(sk.repeat_item())))
+    toggle(s, sk.repeat_item(), False)
+    s.end_if(stale)
     s.end_repeat_each(each_alarm)
 
-    # ── 4. 时钟里没有同名闹钟（循环没提前结束）才新建 ──────────────────────
     # dateComponents 的类型是 DateTimeComponents（App Intent 里编码成
     # WFDateFieldParameter）。按 shortcutkit 的 encoding-table.json，它的合法
     # 编码只有 WFTextTokenString 一种 …\ufffc 附件，附件可以是 ActionOutput /
@@ -420,6 +430,8 @@ def build_main(debug=False):
     # 窗口内，不停手就会连建两个闹钟（后一个还会把前一个关掉），
     # 每天跑一遍就攒一堆关着的闹钟 —— 2026-11-12 用户反馈「会建很多闹钟」。
     s.action(A.EXIT)
+
+    s.end_if(found)
 
     s.end_if(soon)
     s.end_if(future)
