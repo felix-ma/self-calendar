@@ -133,39 +133,46 @@ def build_main(debug=False):
     # 只在 debug=True 时插入。每个关键节点往「日志」变量里追加一行，最后
     # 复制到剪贴板并显示出来，方便整段复制回帖。正常版一条都不插，
     # 免得真机每天跑都要多做几十个动作。
-    def log(*parts):
-        """追加一行日志。parts 可以是字符串，也可以是 sk.ref()/sk.text()/sk.coerce() 的结果。
+    state = {"started": False}
 
-        坑：sk.text() 只认 WFTextTokenAttachment，遇到已经是 WFTextTokenString 的
-        参数会走 str()，把整份字典原样印出来（2026-11-11 真机日志就只看到
-        "{'WFSerializationType': 'WFTextTokenString', ...}"）。所以这里自己拼：
-        遇到 token string 就把它的 string 和 attachmentsByRange 一起并进来，
-        并按 UTF-16 偏移重新编号。
+    def log(*parts):
+        """追加一行日志。parts 可以是字符串，也可以是 sk.ref()/sk.text() 的结果。
+
+        只用「设定变量」这一种动作：日志 = 旧日志 + 新一行。
+        不用「添加到变量」——2026-11-12 真机踩过两次：
+          · 先 Set Variable 日志 = ""，再一路 Add to Variable，最后弹出来是空白；
+          · 而 Show Result 那步把 sk.text() 又套了一层 sk.text()，印出字典原文。
+        现在两头都堵上了：文本自己拼（不让 sk.text 去 str() 字典），
+        变量只靠 Set Variable 自引用累加（不依赖 append 的语义）。
+
+        坑：sk.text() 只认 WFTextTokenAttachment，遇到已经是 WFTextTokenString
+        的参数会走 str()，把整份字典原样印出来。所以这里自己拼：遇到 token
+        string 就把它的 string 和 attachmentsByRange 一起并进来，按 UTF-16
+        偏移重新编号。
         """
         if not debug:
             return
+        chunks = (sk.variable(LOGGER),) + parts if state["started"] else parts
         string = ""
         attachments = {}
-        for part in parts:
+        for part in chunks:
             if isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenString":
                 sub = part["Value"]
                 offset = len(string.encode("utf-16-le")) // 2
                 for rng, value in (sub.get("attachmentsByRange") or {}).items():
-                    start = int(rng.strip("{}").split(",")[0])
-                    attachments[f"{{{offset + start}, 1}}"] = value
+                    start_at = int(rng.strip("{}").split(",")[0])
+                    attachments[f"{{{offset + start_at}, 1}}"] = value
                 string += sub.get("string", "")
             elif isinstance(part, dict) and part.get("WFSerializationType") == "WFTextTokenAttachment":
                 attachments[f"{{{len(string.encode('utf-16-le')) // 2}, 1}}"] = part["Value"]
                 string += "\ufffc"
             else:
                 string += str(part)
-        s.action(A.APPENDVARIABLE,
+        s.action(A.SETVARIABLE,
                  WFInput={"WFSerializationType": "WFTextTokenString",
                           "Value": {"string": string, "attachmentsByRange": attachments}},
                  WFVariableName=LOGGER)
-
-    if debug:
-        s.action(A.SETVARIABLE, WFInput=sk.text(""), WFVariableName=LOGGER)
+        state["started"] = True
 
 
     s.action("is.workflow.actions.comment", WFCommentActionText=(

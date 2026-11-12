@@ -33,6 +33,11 @@ cp "shortcut/排班闹钟·诊断.shortcut" docs/paiban-alarm-debug.shortcut
 它在每个关键节点往「日志」变量追加一行，末尾自动复制到剪贴板并显示出来，
 整段复制回来就能定位。
 
+**日志只用「设定变量」自引用累加，不要用「添加到变量」**：先
+`Set Variable 日志 = ""`、后续一路 `Add to Variable`，在 iOS 上最后弹出来是
+一片空白（2026-11-12 真机踩过）。现在第一条日志直接写实际内容，之后每条都是
+`日志 = 旧日志 + 新一行`。
+
 **日志文本要自己拼接，不能用 `sk.text()` 转 `sk.text()`**：`sk.text()` 只认
 `WFTextTokenAttachment`，遇到已经是 `WFTextTokenString` 的参数会走 `str()`，
 打印出来是 `{'WFSerializationType': 'WFTextTokenString', ...}` 一长串

@@ -244,7 +244,7 @@ class Diagnostics(unittest.TestCase):
         打印出来是 "{'WFSerializationType': 'WFTextTokenString', ...}" 一串。
         """
         logs = [a for a in self.actions
-                if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.appendvariable"]
+                if params(a).get("WFVariableName") == build_shortcut.LOGGER]
         self.assertGreater(len(logs), 5, "诊断版应该有若干条日志")
         for action in logs:
             payload = params(action)["WFInput"]
@@ -273,6 +273,28 @@ class Diagnostics(unittest.TestCase):
         walk(self.actions, "actions")
         self.assertEqual(offenders, [],
                          "这些位置的文本里出现了字典原文：" + "; ".join(offenders))
+
+    def test_debug_log_accumulates_with_set_variable(self):
+        """日志只靠「设定变量」自引用累加，不用「添加到变量」。
+
+        2026-11-12 真机：先 Set Variable 日志 = ""，再一路 Add to Variable，
+        最后弹出来一片空白。改成第一条写实际内容、之后每条都是
+        「日志 = 旧日志 + 新一行」。
+        """
+        log_actions = [a for a in self.actions
+                       if params(a).get("WFVariableName") == build_shortcut.LOGGER]
+        self.assertGreaterEqual(len(log_actions), 6)
+        for action in log_actions:
+            self.assertEqual(action["WFWorkflowActionIdentifier"],
+                             "is.workflow.actions.setvariable",
+                             "日志应该只用 Set Variable 累加")
+        # 第一条不能引用自己（那时还没值），后面每条都必须引用上一版
+        first = params(log_actions[0])["WFInput"]["Value"]
+        self.assertNotIn("日志", str(first.get("attachmentsByRange")))
+        for action in log_actions[1:]:
+            payload = params(action)["WFInput"]["Value"]
+            refs = [v.get("VariableName") for v in payload["attachmentsByRange"].values()]
+            self.assertIn(build_shortcut.LOGGER, refs, "后一条日志要接着旧的往下写")
 
     def test_debug_logs_end_with_output(self):
         """日志末尾要复制到剪贴板并显示，用户才能整段贴回来。"""
