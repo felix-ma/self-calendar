@@ -395,6 +395,21 @@ def _calendar_header() -> list:
     ]
 
 
+# VALARM 里必须带 UID + X-WR-ALARMUID（两者同值）：
+# Apple 自己写进 iCloud 的每条提醒都是这个形状；不带的话 iOS 日历
+# 会把它当成「未命名提醒」，事件详情里显示成「无」（2026-11-13 用户真机遇到，
+# 同一事件 Android 能正常显示两条）。
+# 用 uuid5 从「事件 UID + 提醒标签」推出稳定值，重复发布同一班次不会换 ID。
+ALARM_NS = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
+
+
+def _valarm(e: dict, minutes: int, label: str) -> list:
+    uid = str(uuid.uuid5(ALARM_NS, f"{e['uid']}|{label}|{int(minutes)}"))
+    return ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes)}M", "ACTION:DISPLAY",
+            f"DESCRIPTION:{_esc(label)}", f"UID:{uid}",
+            f"X-WR-ALARMUID:{uid}", "END:VALARM"]
+
+
 def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
     cfg, day, shift = e["cfg"], e["day"], e["shift"]
     store, full, addr = e["store"], e["full"], e["addr"]
@@ -442,13 +457,11 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
             wake_label = "起床洗漱"
             if e["store"]:
                 wake_label += f" · {e['store']}"
-            lines += ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes) + WAKE_LEAD}M",
-                      "ACTION:DISPLAY", f"DESCRIPTION:{_esc(wake_label)}", "END:VALARM"]
+            lines += _valarm(e, int(minutes) + WAKE_LEAD, wake_label)
         label = "该出发了"
         if e["store"]:
             label += f" · {mode}到{e['store']}"
-        lines += ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes)}M", "ACTION:DISPLAY",
-                  f"DESCRIPTION:{_esc(label)}", "END:VALARM"]
+        lines += _valarm(e, int(minutes), label)
     lines.append("END:VEVENT")
     return lines
 

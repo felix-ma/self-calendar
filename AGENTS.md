@@ -150,6 +150,10 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
   别顺手把快捷指令改成建两条，那要重装并真机验证。
 - 页面 `docs/index.html` 解析多个 `TRIGGER`：取最小的是出发、较大的当起床，
   分别渲染「⏰ HH:MM 起床」「🔔 HH:MM 出发」。
+- **每个 `VALARM` 必须带 `UID` + `X-WR-ALARMUID`（同值，走 `_valarm()`）**：
+  Apple 自己写进 iCloud 的提醒都是这个形状，缺了这两个字段时 iOS 日历详情里
+  那条提醒会显示成「无」——2026-11-13 用户真机遇到（同一事件 Android 正常显示两条）。
+  ID 用 `uuid5(ALARM_NS, "{事件UID}|{标签}|{分钟}")` 推导，重复发布同一班次不换号。
 
 ## 常见问题
 
