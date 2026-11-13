@@ -44,6 +44,11 @@ SHIFTS = {
 ALIASES = {"班一": "早班", "班二": "晚班", "班三": "白班",
            "休": "休息", "休息": "休息", "": "休息"}
 
+# 早上班次要多一条「起床洗漱」提醒：起床 = 出发 - WAKE_LEAD。
+# 晚班 15:00 上班不用这条（用户 2026-11-13 明确：早班、白班都要）。
+WAKE_SHIFTS = {"早班", "白班"}
+WAKE_LEAD = 30
+
 PROMPT = """你是排班表识别助手。图片是一张 Excel 排班表截图，通常一行 7 天。
 表头第 1 行是日期（形如 10-19、10/26、11-2），第 2 行是星期（一、二、三、四、五、六、日）。
 日期下面每个员工占两行：第一行是姓名和班次，第二行是门店名。
@@ -401,6 +406,11 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
         #   1. 人和快捷指令都能读：闹钟与日历提醒用同一个提前量
         #   2. 这一行足够短，不会被 iCalendar 的 75 字节折行切断
         desc = f"预留：{minutes} 分钟\n"
+        if shift in WAKE_SHIFTS:
+            wake = (datetime.combine(day, dtime.fromisoformat(cfg["start"]))
+                    - timedelta(minutes=minutes + WAKE_LEAD))
+            # 同理放最前面，短到不会被折行切断；人和快捷指令都能读
+            desc += f"起床：{wake.strftime('%H:%M')} 洗漱\n"
     desc += f"班次：{shift} {cfg['start']}-{cfg['end']}"
     if cfg.get("note"):
         desc += f"（{cfg['note']}）"
@@ -426,6 +436,14 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
             lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
     lines += [f"DESCRIPTION:{_esc(desc)}", "STATUS:CONFIRMED", "TRANSP:OPAQUE"]
     if minutes:
+        # 早班 / 白班两个提醒：先起床洗漱、再该出发了；晚班只有出发。
+        # 多了这条也不影响 alarms.json 与时钟闹钟（那边仍只有出发一条）。
+        if shift in WAKE_SHIFTS:
+            wake_label = "起床洗漱"
+            if e["store"]:
+                wake_label += f" · {e['store']}"
+            lines += ["BEGIN:VALARM", f"TRIGGER:-PT{int(minutes) + WAKE_LEAD}M",
+                      "ACTION:DISPLAY", f"DESCRIPTION:{_esc(wake_label)}", "END:VALARM"]
         label = "该出发了"
         if e["store"]:
             label += f" · {mode}到{e['store']}"
@@ -467,6 +485,8 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
       start       班次开始时间
       start_time  同上，只取 HH:MM
       lead/notify 通勤预留分钟
+      wake        早班/白班的「起床洗漱」时刻（HH:MM），只做参考；
+                  时钟闹钟仍只建 at 这一条（用户 2026-11-13：快捷指令先不动）
     快捷指令流程：客户端按「当前时间」从 alarms[] 里挑第一条还没到、
     且在 24 小时内的，再按 at 建闹钟。这里不做「今天/明天」的判断：
     JSON 是发布时的快照，放久了就会过期，判断必须交给运行时的快捷指令。
@@ -483,7 +503,7 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
         at = start_dt - timedelta(minutes=minutes)
         if at <= now or (limit and at > limit):
             continue
-        out.append({
+        entry = {
             "label": f"{ALARM_LABEL}·{e['shift']}",
             "at": at.strftime("%Y-%m-%dT%H:%M:00"),
             "start": start_dt.strftime("%Y-%m-%dT%H:%M:00"),
@@ -493,7 +513,11 @@ def build_alarms(schedule: dict, path: Path, alarm=None,
             "shift": e["shift"],
             "commute": mode,
             "lead": minutes,
-        })
+        }
+        if e["shift"] in WAKE_SHIFTS:
+            # 只放进清单给人和调试用；时钟闹钟仍按 time 那一条建
+            entry["wake"] = (at - timedelta(minutes=WAKE_LEAD)).strftime("%H:%M")
+        out.append(entry)
     out.sort(key=lambda x: x["at"])
     # 只给清单，不给「下一次该建哪个」：那是运行时的事。
     # 快捷指令用「当前时间」在 alarms[] 里挑，所以这份文件放多久都不会过期。

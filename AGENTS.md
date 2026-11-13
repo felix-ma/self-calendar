@@ -140,6 +140,16 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - 某家可加 `"mode": "ebike"|"taxi"` 覆盖 5 km 规则；`approx: true` 表示坐标是近似值，用户纠正时以配置为准。
 - 用户说「提醒太早/太晚」：调 `traffic_factor` / `extra_min`，或该店的 `drive_min`，再发布。
 - `--alarm off` 关闭提醒，`--alarm N` 统一提前 N 分钟。
+- **早班 / 白班写两个 `VALARM`**：先「起床洗漱」（`TRIGGER:-PT{minutes+WAKE_LEAD}M`），
+  再「该出发了」（`TRIGGER:-PT{minutes}M`）；晚班只写出发那一个。
+  `WAKE_LEAD` 默认 30 分钟，`WAKE_SHIFTS = {"早班", "白班"}`，都在 `paiban.py` 顶部。
+  备注里对应两行短文本 `起床：HH:MM 洗漱` 与 `通勤：…，HH:MM 出发`（都放在
+  备注最前面，短到不会被 75 字节折行切断）。
+- **时钟闹钟仍然只有一条**：`docs/alarms.json` 的 `at` / `time` 不变，早班白班
+  多一个 `wake` 字段只作参考。用户 2026-11-13 明确「先只改日历提醒」，
+  别顺手把快捷指令改成建两条，那要重装并真机验证。
+- 页面 `docs/index.html` 解析多个 `TRIGGER`：取最小的是出发、较大的当起床，
+  分别渲染「⏰ HH:MM 起床」「🔔 HH:MM 出发」。
 
 ## 常见问题
 

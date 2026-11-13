@@ -95,7 +95,7 @@
       <li>Android：Google 日历网页版「其他日历 → 从网址添加」，填本页的 schedule.ics 地址</li>
       <li>只要一次性：点「下载 .ics」，用日历打开</li>
       <li>订阅会定期刷新，下载不会自动更新</li>
-      <li>提醒时间按通勤算：5 km 内电动车、更远打车</li>
+      <li>提醒时间按通勤算：5 km 内电动车、更远打车；早班 / 白班早上响两次（起床洗漱 + 该出发了）</li>
       <li>iPhone 注意：订阅/导入的 .ics 只有一个颜色，系统也不会采用事件里的提醒；要按班次分色 + 逐事件提醒，请用 iCloud 共享的「排班·早班 / 晚班 / 白班」三个日历</li>
       <li>「下载闹钟快捷指令」得到 <code>paiban-alarm.shortcut</code>：iPhone 上用 Safari 下载后点开即可加入快捷指令 App。它只联网、不需要日历权限；建议设一个每天 00:05 的时间自动化并关掉「运行前询问」</li>
     </ul>
@@ -135,7 +135,13 @@ function parseICS(text){
     var key = line.slice(0, idx).split(";")[0];
     var val = line.slice(idx + 1);
     if (inAlarm){
-      if (key === "TRIGGER"){ var tm = /-PT(\d+)M/.exec(val); if (tm) cur.alarmMin = +tm[1]; }
+      if (key === "TRIGGER"){
+        var tm = /-PT(\d+)M/.exec(val);
+        if (tm){
+          cur.alarmMins = cur.alarmMins || [];
+          cur.alarmMins.push(+tm[1]);
+        }
+      }
       continue;
     }
     if (key === "DTSTART") cur.start = val;
@@ -159,7 +165,8 @@ function parseICS(text){
       url: e.url || "",
       mode: cm ? cm[1] : "",
       km: cm ? cm[2] : "",
-      alarmMin: e.alarmMin || 0,
+      alarmMin: (e.alarmMins && e.alarmMins.length) ? Math.min.apply(null, e.alarmMins) : 0,
+      wakeMin: (e.alarmMins && e.alarmMins.length > 1) ? Math.max.apply(null, e.alarmMins) : 0,
       key: m[1] + "-" + m[2] + "-" + m[3]
     });
   }
@@ -272,9 +279,13 @@ function renderList(){
       }
       var meta = [];
       if (e.mode) meta.push((e.mode === "打车" ? "\ud83d\ude95 " : "\ud83d\udef5 ") + e.mode + " " + e.km + " km");
+      if (e.wakeMin){
+        var w0 = (e.h * 60 + e.mi - e.wakeMin + 1440) % 1440;
+        meta.push("\u23f0 " + pad(Math.floor(w0 / 60)) + ":" + pad(w0 % 60) + " 起床");
+      }
       if (e.alarmMin){
         var t0 = (e.h * 60 + e.mi - e.alarmMin + 1440) % 1440;
-        meta.push("\ud83d\udd14 " + pad(Math.floor(t0 / 60)) + ":" + pad(t0 % 60) + " 提醒");
+        meta.push("\ud83d\udd14 " + pad(Math.floor(t0 / 60)) + ":" + pad(t0 % 60) + " 出发");
       }
       if (meta.length){
         var metaEl = document.createElement("div");
@@ -322,7 +333,7 @@ function boot(){
       if (EVENTS.length){
         view = new Date(EVENTS[0].y, EVENTS[0].mo - 1, 1);
         document.getElementById("sub").textContent =
-          "共 " + EVENTS.length + " 个未结束的班次 · 提醒按通勤时间";
+          "共 " + EVENTS.length + " 个未结束的班次 · 提醒按通勤时间，早上班两次提醒";
       } else {
         view = new Date(now.getFullYear(), now.getMonth(), 1);
         document.getElementById("sub").textContent = "暂无未结束的班次";
