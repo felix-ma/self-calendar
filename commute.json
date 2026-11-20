@@ -38,6 +38,13 @@
       "km": 5.4,
       "drive_min": 5.5,
       "mode": "ebike"
+    },
+    "阳光里": {
+      "lat": 22.62837,
+      "lon": 114.02451,
+      "km": 8.6,
+      "drive_min": 9.2,
+      "approx": true
     }
   },
   "modes": {
