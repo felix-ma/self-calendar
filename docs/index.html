@@ -157,6 +157,11 @@ function parseICS(text){
     if (!m) continue;
     var e2 = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(e.end || "");
     var cm = /通勤：(骑电动车|打车)\s*([\d.]+)\s*km/.exec(e.description || "");
+    // 提醒时刻优先从备注读（通勤行 / 起床 / 前一晚）：跨天的「前一晚」不适合用
+    // TRIGGER 分钟数反推，备注里已经是人类可读的 HH:MM。
+    var lm = /，(\d{2}:\d{2})\s*出发/.exec(e.description || "");
+    var wm = /起床：(\d{2}:\d{2})/.exec(e.description || "");
+    var nm = /前一晚：(\d{2}:\d{2})/.exec(e.description || "");
     events.push({
       y:+m[1], mo:+m[2], d:+m[3], h:+m[4], mi:+m[5],
       eh: e2 ? +e2[4] : null, emi: e2 ? +e2[5] : null,
@@ -167,6 +172,9 @@ function parseICS(text){
       km: cm ? cm[2] : "",
       alarmMin: (e.alarmMins && e.alarmMins.length) ? Math.min.apply(null, e.alarmMins) : 0,
       wakeMin: (e.alarmMins && e.alarmMins.length > 1) ? Math.max.apply(null, e.alarmMins) : 0,
+      leaveHM: lm ? lm[1] : "",
+      wakeHM: wm ? wm[1] : "",
+      nightHM: nm ? nm[1] : "",
       key: m[1] + "-" + m[2] + "-" + m[3]
     });
   }
@@ -278,14 +286,23 @@ function renderList(){
         main.appendChild(addr);
       }
       var meta = [];
+      if (e.nightHM) meta.push("\ud83c\udf19 " + e.nightHM + " 前一晚提醒");
       if (e.mode) meta.push((e.mode === "打车" ? "\ud83d\ude95 " : "\ud83d\udef5 ") + e.mode + " " + e.km + " km");
-      if (e.wakeMin){
-        var w0 = (e.h * 60 + e.mi - e.wakeMin + 1440) % 1440;
-        meta.push("\u23f0 " + pad(Math.floor(w0 / 60)) + ":" + pad(w0 % 60) + " 起床");
+      if (e.wakeHM || e.wakeMin){
+        var whm = e.wakeHM;
+        if (!whm){
+          var w0 = (e.h * 60 + e.mi - e.wakeMin + 1440) % 1440;
+          whm = pad(Math.floor(w0 / 60)) + ":" + pad(w0 % 60);
+        }
+        meta.push("\u23f0 " + whm + " 起床");
       }
-      if (e.alarmMin){
-        var t0 = (e.h * 60 + e.mi - e.alarmMin + 1440) % 1440;
-        meta.push("\ud83d\udd14 " + pad(Math.floor(t0 / 60)) + ":" + pad(t0 % 60) + " 出发");
+      if (e.leaveHM || e.alarmMin){
+        var thm = e.leaveHM;
+        if (!thm){
+          var t0 = (e.h * 60 + e.mi - e.alarmMin + 1440) % 1440;
+          thm = pad(Math.floor(t0 / 60)) + ":" + pad(t0 % 60);
+        }
+        meta.push("\ud83d\udd14 " + thm + " 出发");
       }
       if (meta.length){
         var metaEl = document.createElement("div");

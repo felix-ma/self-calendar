@@ -49,6 +49,11 @@ ALIASES = {"班一": "早班", "班二": "晚班", "班三": "白班",
 WAKE_SHIFTS = {"早班", "白班"}
 WAKE_LEAD = 30
 
+# 早班 / 白班再补一条「前一天晚上」提醒（用户 2026-11-26：提前一晚上通知）。
+# 只给早班、白班；晚班下午才上班，不打扰。
+NIGHT_SHIFTS = {"早班", "白班"}
+NIGHT_ALARM = dtime(21, 0)
+
 PROMPT = """你是排班表识别助手。图片是一张 Excel 排班表截图，通常一行 7 天。
 表头第 1 行是日期（形如 10-19、10/26、11-2），第 2 行是星期（一、二、三、四、五、六、日）。
 日期下面每个员工占两行：第一行是姓名和班次，第二行是门店名。
@@ -421,6 +426,9 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
         #   1. 人和快捷指令都能读：闹钟与日历提醒用同一个提前量
         #   2. 这一行足够短，不会被 iCalendar 的 75 字节折行切断
         desc = f"预留：{minutes} 分钟\n"
+        if shift in NIGHT_SHIFTS:
+            # 短到不会被折行切断，放在备注前面
+            desc += f"前一晚：{NIGHT_ALARM.strftime('%H:%M')} 提醒\n"
         if shift in WAKE_SHIFTS:
             wake = (datetime.combine(day, dtime.fromisoformat(cfg["start"]))
                     - timedelta(minutes=minutes + WAKE_LEAD))
@@ -451,17 +459,29 @@ def _event_lines(e: dict, stamp: str, fixed_alarm=None) -> list:
             lines.append(f"URL:{amap_search_url(full + ' ' + addr)}")
     lines += [f"DESCRIPTION:{_esc(desc)}", "STATUS:CONFIRMED", "TRANSP:OPAQUE"]
     if minutes:
-        # 早班 / 白班两个提醒：先起床洗漱、再该出发了；晚班只有出发。
-        # 多了这条也不影响 alarms.json 与时钟闹钟（那边仍只有出发一条）。
+        alarms = []  # (提前分钟, 标签)，按响铃从早到晚排
+        if shift in NIGHT_SHIFTS:
+            # 前一晚 21:00 提醒：写成相对 DTSTART 的提前量（早班 08:00 → 660 分钟），
+            # 与另外两条保持同一种写法，跨天也不用绝对时刻。
+            night_dt = datetime.combine(day - timedelta(days=1), NIGHT_ALARM, tzinfo=TZOFF)
+            start_dt = datetime.combine(day, dtime.fromisoformat(cfg["start"]), tzinfo=TZOFF)
+            night_label = "明早有班"
+            if e["store"]:
+                night_label += f" · {e['store']}"
+            alarms.append((int((start_dt - night_dt).total_seconds() // 60), night_label))
         if shift in WAKE_SHIFTS:
             wake_label = "起床洗漱"
             if e["store"]:
                 wake_label += f" · {e['store']}"
-            lines += _valarm(e, int(minutes) + WAKE_LEAD, wake_label)
-        label = "该出发了"
+            alarms.append((int(minutes) + WAKE_LEAD, wake_label))
+        leave_label = "该出发了"
         if e["store"]:
-            label += f" · {mode}到{e['store']}"
-        lines += _valarm(e, int(minutes), label)
+            leave_label += f" · {mode}到{e['store']}"
+        alarms.append((int(minutes), leave_label))
+        # 早班 / 白班三条：前一晚、起床洗漱、该出发了；晚班只有出发。
+        # 多了不影响 alarms.json 与时钟闹钟（那边仍只有出发一条）。
+        for mins, label in alarms:
+            lines += _valarm(e, mins, label)
     lines.append("END:VEVENT")
     return lines
 

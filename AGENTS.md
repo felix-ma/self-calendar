@@ -140,16 +140,20 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 - 某家可加 `"mode": "ebike"|"taxi"` 覆盖 5 km 规则；`approx: true` 表示坐标是近似值，用户纠正时以配置为准。
 - 用户说「提醒太早/太晚」：调 `traffic_factor` / `extra_min`，或该店的 `drive_min`，再发布。
 - `--alarm off` 关闭提醒，`--alarm N` 统一提前 N 分钟。
-- **早班 / 白班写两个 `VALARM`**：先「起床洗漱」（`TRIGGER:-PT{minutes+WAKE_LEAD}M`），
-  再「该出发了」（`TRIGGER:-PT{minutes}M`）；晚班只写出发那一个。
+- **早班 / 白班写三个 `VALARM`**：最先是「前一晚 21:00 明早有班」
+  （`TRIGGER` 用相对 DTSTART 的分钟数，早班 08:00 → `-PT660M`，跨天也这么写，
+  不用绝对时刻），再「起床洗漱」（`TRIGGER:-PT{minutes+WAKE_LEAD}M`），
+  最后「该出发了」（`TRIGGER:-PT{minutes}M`）；晚班只写出发那一个。
+  `NIGHT_SHIFTS = {"早班", "白班"}` + `NIGHT_ALARM = 21:00` 在 `paiban.py` 顶部，
+  用户 2026-11-26 明确「提前一晚上通知」，只给早班白班、晚班不打扰。
   `WAKE_LEAD` 默认 30 分钟，`WAKE_SHIFTS = {"早班", "白班"}`，都在 `paiban.py` 顶部。
-  备注里对应两行短文本 `起床：HH:MM 洗漱` 与 `通勤：…，HH:MM 出发`（都放在
-  备注最前面，短到不会被 75 字节折行切断）。
+  备注里对应三行短文本 `前一晚：21:00 提醒`、`起床：HH:MM 洗漱` 与
+  `通勤：…，HH:MM 出发`（都放在备注最前面，短到不会被 75 字节折行切断）。
 - **时钟闹钟仍然只有一条**：`docs/alarms.json` 的 `at` / `time` 不变，早班白班
   多一个 `wake` 字段只作参考。用户 2026-11-13 明确「先只改日历提醒」，
   别顺手把快捷指令改成建两条，那要重装并真机验证。
-- 页面 `docs/index.html` 解析多个 `TRIGGER`：取最小的是出发、较大的当起床，
-  分别渲染「⏰ HH:MM 起床」「🔔 HH:MM 出发」。
+- 页面 `docs/index.html` 的提醒时刻改从**备注读**（`前一晚：` / `起床：` /
+  `，HH:MM 出发`），不再靠 `TRIGGER` 分钟数反推 —— 跨天的前一晚用分钟数反推会算错。
 - **每个 `VALARM` 必须带 `UID` + `X-WR-ALARMUID`（同值，走 `_valarm()`）**：
   Apple 自己写进 iCloud 的提醒都是这个形状，缺了这两个字段时 iOS 日历详情里
   那条提醒会显示成「无」——2026-11-13 用户真机遇到（同一事件 Android 正常显示两条）。
