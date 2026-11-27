@@ -49,6 +49,12 @@ ALIASES = {"班一": "早班", "班二": "晚班", "班三": "白班",
 WAKE_SHIFTS = {"早班", "白班"}
 WAKE_LEAD = 30
 
+# 历史保留窗口（天）。用户 2026-11-27：不要每次运行就把当天之前的清掉，
+# 想一个月清一次。所以已结束的班次继续留在 .ics 和 iCloud 里，
+# 只有结束超过 RETAIN_DAYS 天的才在下次发布时删掉（滚动保留，约一个月）。
+# 0 = 旧行为（下班即消失）；--all 仍然导出全部历史。
+RETAIN_DAYS = int(os.environ.get("PAIBAN_RETAIN_DAYS", "31"))
+
 # 早班 / 白班再补一条「前一天晚上」提醒（用户 2026-11-26：提前一晚上通知）。
 # 只给早班、白班；晚班下午才上班，不打扰。
 NIGHT_SHIFTS = {"早班", "白班"}
@@ -348,9 +354,15 @@ def _stamp(schedule: dict) -> str:
 
 
 def collect_events(schedule: dict, keep_all: bool = False) -> tuple[list, int]:
+    """返回 (要发布的事件, 被清理的历史条数)。
+
+    默认保留「未结束 + 结束不满 RETAIN_DAYS 天」的班次，只有超出窗口的旧班次
+    才从日历里删掉（滚动保留一个月，用户 2026-11-27 要求）；keep_all=True 全留。
+    """
     days = [d for d in schedule.get("days", []) if d.get("shift") != "休息"]
     places = load_places()
     now = datetime.now(TZOFF)
+    cutoff = now - timedelta(days=RETAIN_DAYS)
     out, skipped = [], 0
     for d in sorted(days, key=lambda x: (x["date"], x["shift"])):
         shift = d["shift"]
@@ -360,7 +372,7 @@ def collect_events(schedule: dict, keep_all: bool = False) -> tuple[list, int]:
         day = date.fromisoformat(d["date"])
         start_dt = datetime.combine(day, dtime.fromisoformat(cfg["start"]), tzinfo=TZOFF)
         end_dt = datetime.combine(day, dtime.fromisoformat(cfg["end"]), tzinfo=TZOFF)
-        if not keep_all and end_dt <= now:
+        if not keep_all and end_dt <= cutoff:
             skipped += 1
             continue
         store = d.get("store", "") or ""
@@ -750,8 +762,8 @@ def cmd_build(args) -> None:
     schedule = json.loads(src.read_text(encoding="utf-8"))
     out = Path(args.out)
     kept, skipped = build_ics(schedule, out, parse_alarm(args.alarm), args.all)
-    note = f"，跳过 {skipped} 个已结束" if skipped else ""
-    print(f"已生成 {args.out}：{kept} 个未结束的班次{note}", file=sys.stderr)
+    note = f"，清理 {skipped} 个超过 {RETAIN_DAYS} 天的旧班次" if skipped else ""
+    print(f"已生成 {args.out}：{kept} 个班次{note}", file=sys.stderr)
     n, ap = build_alarms(schedule, out.with_name("alarms.json"),
                          parse_alarm(args.alarm), args.all, args.alarm_days)
     print(f"已生成 {ap.name}：{n} 个待建闹钟", file=sys.stderr)
@@ -801,7 +813,7 @@ def cmd_publish(args) -> None:
         die("没有 schedule.json")
     schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
     kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
-    note = f"（跳过 {skipped} 个已结束）" if skipped else ""
+    note = f"（清理 {skipped} 个超过 {RETAIN_DAYS} 天的旧班次）" if skipped else ""
     print(f"日历：{kept} 个班次{note}", file=sys.stderr)
     n, _ = build_alarms(schedule, ROOT / "docs" / "alarms.json",
                         parse_alarm(args.alarm), args.all, getattr(args, "alarm_days", 0))
@@ -815,13 +827,23 @@ def cmd_publish(args) -> None:
 
 def cmd_status(args) -> None:
     schedule = json.loads((ROOT / "schedule.json").read_text(encoding="utf-8"))
-    events, _ = collect_events(schedule, False)
+    events, cleaned = collect_events(schedule, False)
     if not events:
         print("没有未结束的班次")
         return
+    now = datetime.now(TZOFF)
+    upcoming, past = [], []
     for e in events:
+        end_dt = datetime.combine(e["day"], dtime.fromisoformat(e["cfg"]["end"]), tzinfo=TZOFF)
+        (upcoming if end_dt > now else past).append(e)
+    for e in upcoming:
         print(f"{e['day']}  {e['shift']}  {e['cfg']['start']}-{e['cfg']['end']}  {e['store']}")
-    print(f"\n共 {len(events)} 个未结束班次")
+    print(f"\n共 {len(upcoming)} 个未结束班次")
+    if past:
+        print(f"日历里还保留 {len(past)} 个已结束班次"
+              f"（{past[0]['day']} ~ {past[-1]['day']}，滚动保留 {RETAIN_DAYS} 天）")
+    if cleaned:
+        print(f"下次发布会清理 {cleaned} 个超过 {RETAIN_DAYS} 天的旧班次")
     r = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True)
     print("仓库有未提交改动" if r.stdout.strip() else "仓库干净")
 
@@ -839,7 +861,7 @@ def cmd_update(args) -> None:
         die("没有 schedule.json，无法生成")
     schedule = json.loads(schedule_path.read_text(encoding="utf-8"))
     kept, skipped = build_ics(schedule, ROOT / "docs" / "schedule.ics", parse_alarm(args.alarm), args.all)
-    note = f"，跳过 {skipped} 个已结束" if skipped else ""
+    note = f"，清理 {skipped} 个超过 {RETAIN_DAYS} 天的旧班次" if skipped else ""
     print(f"已生成 docs/schedule.ics：{kept} 个班次{note}", file=sys.stderr)
     n, _ = build_alarms(schedule, ROOT / "docs" / "alarms.json",
                         parse_alarm(args.alarm), args.all, getattr(args, "alarm_days", 0))
@@ -859,7 +881,7 @@ def main(argv=None) -> None:
     p.add_argument("schedule", nargs="?", default="schedule.json")
     p.add_argument("-o", "--out", default="docs/schedule.ics")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
-    p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--all", action="store_true", help=f"保留全部历史班次（默认滚动保留 {RETAIN_DAYS} 天）")
     p.add_argument("--alarm-days", type=int, default=0, help="alarms.json 覆盖未来几天，0=全部未结束班次（默认 0）")
     p.set_defaults(func=cmd_build)
 
@@ -867,7 +889,7 @@ def main(argv=None) -> None:
     p.add_argument("--no-git", action="store_true", help="不提交推送")
     p.add_argument("--no-caldav", action="store_true", help="不同步 iCloud")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
-    p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--all", action="store_true", help=f"保留全部历史班次（默认滚动保留 {RETAIN_DAYS} 天）")
     p.add_argument("--alarm-days", type=int, default=0, help="alarms.json 覆盖未来几天，0=全部未结束班次（默认 0）")
     p.set_defaults(func=cmd_publish)
 
@@ -876,13 +898,13 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("sync-caldav", help="同步到 iCloud 日历")
     p.add_argument("schedule", nargs="?", default="schedule.json")
-    p.add_argument("--all", action="store_true", help="包含已结束的班次")
+    p.add_argument("--all", action="store_true", help=f"包含全部历史班次（默认滚动保留 {RETAIN_DAYS} 天）")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("update", help="识别 images/ 下所有截图并重新生成")
     p.add_argument("--alarm", default="auto", help="auto=按通勤时间，off=不提醒，或固定分钟数")
-    p.add_argument("--all", action="store_true", help="保留历史班次（默认只留未结束的）")
+    p.add_argument("--all", action="store_true", help=f"保留全部历史班次（默认滚动保留 {RETAIN_DAYS} 天）")
     p.add_argument("--alarm-days", type=int, default=0, help="alarms.json 覆盖未来几天，0=全部未结束班次（默认 0）")
     p.set_defaults(func=cmd_update)
 

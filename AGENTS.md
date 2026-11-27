@@ -41,7 +41,9 @@ export DEEPSEEK_API_KEY="$($PWD/.venv/bin/python -c "import yaml;print(yaml.safe
 
 ## 硬规则
 
-- 只输出**未结束**的班次；`--all` 才含历史。
+- 滚动保留 **31 天**（`RETAIN_DAYS`，环境变量 `PAIBAN_RETAIN_DAYS` 可覆盖）：
+  已结束的班次继续留在日历里，只有结束超过 31 天才在下次发布时删除（用户 2026-11-27：
+  不要每次运行就把当天之前的清掉，想一个月清一次）；`--all` 导出全部历史。
 - 不写姓名；不提交截图；不加 GitHub Actions。
 - 说明文档（README、本文件、页面文案）不写门店名、地址、坐标、距离；
   这些只放 `places.json`、`commute.json`。
